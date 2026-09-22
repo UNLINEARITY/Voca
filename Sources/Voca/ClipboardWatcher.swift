@@ -171,6 +171,29 @@ final class ClipboardWatcher: ObservableObject {
         entries.removeAll()
         store.clearClipboardEntries()
     }
+
+    /// 把文本写回剪贴板（Voca 自己发起的写入不计入历史）
+    func copyText(_ text: String) {
+        let pasteboard = NSPasteboard.general
+        pasteboard.clearContents()
+        guard pasteboard.setString(text, forType: .string) else { return }
+        // 同步基准：下一次轮询视为“无变化”，不产生新记录
+        lastChangeCount = pasteboard.changeCount
+        ToastController.shared.show("已复制")
+    }
+
+    /// 把历史条目写回剪贴板（文本或图片；不计入历史）
+    func copyToPasteboard(_ entry: ClipboardEntry) {
+        if let text = entry.text {
+            copyText(text)
+            return
+        }
+        guard let image = entry.image else { return }
+        let pasteboard = NSPasteboard.general
+        guard pasteboard.writeObjects([image]) else { return }
+        lastChangeCount = pasteboard.changeCount
+        ToastController.shared.show("已复制")
+    }
 }
 
 // MARK: - 剪贴板历史窗口
@@ -179,6 +202,7 @@ struct ClipboardHistoryView: View {
     @EnvironmentObject private var watcher: ClipboardWatcher
     @EnvironmentObject private var store: ClipStore
     @State private var promotedIDs: Set<UUID> = []
+    @State private var expandedIDs: Set<UUID> = []
 
     var body: some View {
         NavigationStack {
@@ -214,13 +238,36 @@ struct ClipboardHistoryView: View {
     }
 
     private func row(_ entry: ClipboardEntry) -> some View {
-        VStack(alignment: .leading, spacing: 6) {
-            content(entry)
+        let expanded = expandedIDs.contains(entry.id)
+        return VStack(alignment: .leading, spacing: 6) {
+            content(entry, expanded: expanded)
 
             HStack(spacing: 8) {
                 Label(entry.appName ?? "未知来源", systemImage: "app.dashed")
                 Spacer()
                 Text(entry.date.formatted(date: .omitted, time: .standard))
+                if entry.isText {
+                    Button {
+                        if expanded {
+                            expandedIDs.remove(entry.id)
+                        } else {
+                            expandedIDs.insert(entry.id)
+                        }
+                    } label: {
+                        Image(systemName: expanded ? "chevron.up" : "chevron.down")
+                    }
+                    .buttonStyle(.borderless)
+                    .help(expanded ? "收起" : "展开全文")
+                }
+                if entry.isText || entry.image != nil {
+                    Button {
+                        watcher.copyToPasteboard(entry)
+                    } label: {
+                        Image(systemName: "doc.on.doc")
+                    }
+                    .buttonStyle(.borderless)
+                    .help("复制到剪贴板")
+                }
                 if entry.isText {
                     let promoted = promotedIDs.contains(entry.id)
                     Button {
@@ -248,11 +295,11 @@ struct ClipboardHistoryView: View {
     }
 
     @ViewBuilder
-    private func content(_ entry: ClipboardEntry) -> some View {
+    private func content(_ entry: ClipboardEntry, expanded: Bool) -> some View {
         if let text = entry.text {
             Text(text)
                 .font(.system(size: 13))
-                .lineLimit(3)
+                .lineLimit(expanded ? nil : 5)
                 .truncationMode(.tail)
                 .textSelection(.enabled)
         } else if let files = entry.fileNames {
@@ -275,14 +322,14 @@ struct ClipboardHistoryView: View {
     private func save(_ entry: ClipboardEntry) {
         guard let text = entry.text else { return }
         do {
-            // 入库时间 = 复制时间；入库后保留剪贴板记录
-            try store.insert(
+            // 入库时间 = 复制时间；同文本合并计数；入库后保留剪贴板记录
+            let clip = try store.save(
                 text: text,
                 appName: entry.appName,
                 bundleID: entry.appBundleID,
                 date: entry.date
             )
-            ToastController.shared.show("已加入词库")
+            ToastController.shared.show(clip.count > 1 ? "已入库（第 \(clip.count) 次）" : "已加入词库")
             promotedIDs.insert(entry.id)
         } catch {
             ToastController.shared.show("入库失败：\(error.localizedDescription)")

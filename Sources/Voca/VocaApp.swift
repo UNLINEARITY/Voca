@@ -52,14 +52,14 @@ final class AppModel: ObservableObject {
         switch result {
         case .success(let text, let appName, let bundleID):
             let capped = String(text.prefix(10_000))
-            if store.isRecentDuplicate(text: capped, bundleID: bundleID) {
-                ToastController.shared.show("重复内容，未再次保存")
-                return
-            }
             do {
-                try store.insert(text: capped, appName: appName, bundleID: bundleID)
+                let clip = try store.save(text: capped, appName: appName, bundleID: bundleID)
                 let suffix = appName.map { " · 来自 \($0)" } ?? ""
-                ToastController.shared.show("已保存\(suffix)")
+                if clip.count > 1 {
+                    ToastController.shared.show("第 \(clip.count) 次记录，已置顶\(suffix)")
+                } else {
+                    ToastController.shared.show("已保存\(suffix)")
+                }
             } catch {
                 ToastController.shared.show("保存失败：\(error.localizedDescription)")
             }
@@ -111,6 +111,7 @@ struct VocaApp: App {
         Window("Voca 记录", id: "records") {
             RecordsView()
                 .environmentObject(model.store)
+                .environmentObject(model.clipboardWatcher)
         }
         .defaultSize(width: 560, height: 480)
 
@@ -185,6 +186,8 @@ struct MenuBarView: View {
 struct RecordsView: View {
     @EnvironmentObject private var store: ClipStore
     @State private var search = ""
+    @State private var editingClip: Clip?
+    @State private var timelineClip: Clip?
 
     var body: some View {
         NavigationStack {
@@ -200,7 +203,11 @@ struct RecordsView: View {
                     .frame(maxWidth: .infinity, maxHeight: .infinity)
                 } else {
                     List(store.clips) { clip in
-                        ClipRow(clip: clip)
+                        ClipRow(
+                            clip: clip,
+                            onEdit: { editingClip = clip },
+                            onTimeline: { timelineClip = clip }
+                        )
                     }
                     .listStyle(.inset)
                 }
@@ -223,34 +230,73 @@ struct RecordsView: View {
             .onAppear {
                 store.reload(search: search)
             }
+            .sheet(item: $editingClip) { clip in
+                EditClipSheet(clip: clip) { text, note in
+                    store.update(clip, text: text, note: note)
+                    store.reload(search: search)
+                }
+            }
+            .sheet(item: $timelineClip) { clip in
+                ClipTimelineSheet(clip: clip)
+            }
         }
     }
 }
 
 struct ClipRow: View {
     let clip: Clip
+    var onEdit: () -> Void
+    var onTimeline: () -> Void
     @EnvironmentObject private var store: ClipStore
+    @EnvironmentObject private var watcher: ClipboardWatcher
+    @State private var expanded = false
 
     var body: some View {
         VStack(alignment: .leading, spacing: 6) {
             Text(clip.text)
                 .font(.system(size: 13))
-                .lineLimit(4)
+                .lineLimit(expanded ? nil : 5)
                 .truncationMode(.tail)
                 .textSelection(.enabled)
 
             HStack(spacing: 8) {
                 Label(clip.appName ?? "未知来源", systemImage: "app.dashed")
+                if clip.count > 1 {
+                    Text("×\(clip.count)")
+                        .padding(.horizontal, 5)
+                        .padding(.vertical, 1)
+                        .background(Capsule().fill(.quaternary))
+                }
                 Spacer()
-                Text(clip.createdAt.formatted(date: .abbreviated, time: .shortened))
+                Text(clip.lastSeenAt.formatted(date: .abbreviated, time: .shortened))
                 Button {
-                    NSPasteboard.general.clearContents()
-                    NSPasteboard.general.setString(clip.text, forType: .string)
+                    expanded.toggle()
+                } label: {
+                    Image(systemName: expanded ? "chevron.up" : "chevron.down")
+                }
+                .buttonStyle(.borderless)
+                .help(expanded ? "收起" : "展开全文")
+                Button {
+                    watcher.copyText(clip.text)
                 } label: {
                     Image(systemName: "doc.on.doc")
                 }
                 .buttonStyle(.borderless)
                 .help("复制全文")
+                Button {
+                    onTimeline()
+                } label: {
+                    Image(systemName: "clock.arrow.circlepath")
+                }
+                .buttonStyle(.borderless)
+                .help("时间线")
+                Button {
+                    onEdit()
+                } label: {
+                    Image(systemName: "pencil")
+                }
+                .buttonStyle(.borderless)
+                .help("编辑")
                 Button {
                     store.delete(clip)
                 } label: {
@@ -265,12 +311,128 @@ struct ClipRow: View {
         .padding(.vertical, 4)
         .contextMenu {
             Button("复制全文") {
-                NSPasteboard.general.clearContents()
-                NSPasteboard.general.setString(clip.text, forType: .string)
+                watcher.copyText(clip.text)
+            }
+            Button("时间线…") {
+                onTimeline()
+            }
+            Button("编辑…") {
+                onEdit()
             }
             Button("删除", role: .destructive) {
                 store.delete(clip)
             }
+        }
+    }
+}
+
+/// 编辑记录：修改文本、添加备注
+struct EditClipSheet: View {
+    let clip: Clip
+    let onSave: (String, String?) -> Void
+    @Environment(\.dismiss) private var dismiss
+    @State private var text: String
+    @State private var note: String
+
+    init(clip: Clip, onSave: @escaping (String, String?) -> Void) {
+        self.clip = clip
+        self.onSave = onSave
+        _text = State(initialValue: clip.text)
+        _note = State(initialValue: clip.note ?? "")
+    }
+
+    private var trimmedText: String {
+        text.trimmingCharacters(in: .whitespacesAndNewlines)
+    }
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 12) {
+            Text("编辑记录").font(.headline)
+
+            TextEditor(text: $text)
+                .font(.system(size: 13))
+                .frame(minHeight: 200)
+                .padding(4)
+                .background(Color(nsColor: .textBackgroundColor))
+                .cornerRadius(6)
+                .overlay(
+                    RoundedRectangle(cornerRadius: 6)
+                        .strokeBorder(.quaternary, lineWidth: 1)
+                )
+
+            TextField("备注（可选）", text: $note)
+                .textFieldStyle(.roundedBorder)
+
+            HStack {
+                Button("取消") {
+                    dismiss()
+                }
+                Spacer()
+                Button("保存") {
+                    let trimmedNote = note.trimmingCharacters(in: .whitespacesAndNewlines)
+                    onSave(text, trimmedNote.isEmpty ? nil : trimmedNote)
+                    dismiss()
+                }
+                .keyboardShortcut(.defaultAction)
+                .disabled(trimmedText.isEmpty)
+            }
+        }
+        .padding(16)
+        .frame(width: 460, height: 380)
+    }
+}
+
+/// 时间线子页面：某条记录的每次出现时间与来源
+struct ClipTimelineSheet: View {
+    let clip: Clip
+    @EnvironmentObject private var store: ClipStore
+    @Environment(\.dismiss) private var dismiss
+    @State private var events: [ClipEvent] = []
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 12) {
+            Text("时间线 · 共 \(clip.count) 次记录")
+                .font(.headline)
+
+            Text(clip.text)
+                .font(.system(size: 12))
+                .foregroundStyle(.secondary)
+                .lineLimit(2)
+
+            if events.isEmpty {
+                Text("暂无事件记录\n（该条目早于时间线功能，仅保留了合并计数）")
+                    .multilineTextAlignment(.center)
+                    .foregroundStyle(.secondary)
+                    .frame(maxWidth: .infinity, maxHeight: .infinity)
+            } else {
+                List(events) { event in
+                    HStack {
+                        VStack(alignment: .leading, spacing: 2) {
+                            Text(event.date.formatted(date: .abbreviated, time: .standard))
+                            Text(event.appName ?? "未知来源")
+                                .foregroundStyle(.secondary)
+                        }
+                        Spacer()
+                        Image(systemName: "app.dashed")
+                            .foregroundStyle(.quaternary)
+                    }
+                    .font(.system(size: 13))
+                }
+                .listStyle(.inset)
+            }
+
+            HStack {
+                Spacer()
+                Button("关闭") {
+                    dismiss()
+                }
+                .keyboardShortcut(.cancelAction)
+            }
+        }
+        .padding(16)
+        .frame(width: 400, height: 460)
+        .onAppear {
+            events = store.events(for: clip)
         }
     }
 }

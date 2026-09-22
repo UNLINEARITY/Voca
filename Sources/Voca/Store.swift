@@ -30,10 +30,25 @@ struct Clip: Codable, Identifiable, Equatable, FetchableRecord, MutablePersistab
     var appBundleID: String?
     var wordCount: Int
     var createdAt: Date
+    /// 同文本出现次数（去重合并）
+    var count: Int
+    /// 最近一次保存时间（列表置顶排序键）
+    var lastSeenAt: Date
 
     mutating func didInsert(_ inserted: InsertionSuccess) {
         id = inserted.rowID
     }
+}
+
+/// 一次保存事件（时间线条目）
+struct ClipEvent: Codable, Identifiable, Equatable, FetchableRecord, PersistableRecord {
+    static let databaseTableName = "clip_events"
+
+    var id: Int64?
+    var clipId: Int64
+    var date: Date
+    var appName: String?
+    var appBundleID: String?
 }
 
 final class ClipStore: ObservableObject {
@@ -83,6 +98,25 @@ final class ClipStore: ObservableObject {
                 columns: ["date"]
             )
         }
+        migrator.registerMigration("v3") { db in
+            try db.execute(sql: "ALTER TABLE clips ADD COLUMN count INTEGER NOT NULL DEFAULT 1")
+            // SQLite 限制：ADD COLUMN 不允许 CURRENT_TIMESTAMP 等非常量默认值，用常量后立即回填
+            try db.execute(sql: "ALTER TABLE clips ADD COLUMN lastSeenAt DATETIME NOT NULL DEFAULT '1970-01-01 00:00:00'")
+            try db.execute(sql: "UPDATE clips SET lastSeenAt = createdAt")
+            try db.create(table: ClipEvent.databaseTableName) { t in
+                t.autoIncrementedPrimaryKey("id")
+                t.column("clipId", .integer).notNull()
+                    .references(Clip.databaseTableName, onDelete: .cascade)
+                t.column("date", .datetime).notNull()
+                t.column("appName", .text)
+                t.column("appBundleID", .text)
+            }
+            try db.create(
+                index: "idx_clip_events_clipId",
+                on: ClipEvent.databaseTableName,
+                columns: ["clipId"]
+            )
+        }
         try migrator.migrate(dbQueue)
         reload()
     }
@@ -94,12 +128,12 @@ final class ClipStore: ObservableObject {
         do {
             clips = try dbQueue.read { db -> [Clip] in
                 if term.isEmpty {
-                    return try Clip.order(Column("createdAt").desc).limit(2000).fetchAll(db)
+                    return try Clip.order(Column("lastSeenAt").desc).limit(2000).fetchAll(db)
                 }
                 let pattern = Self.likePattern(term)
                 return try Clip
                     .filter(sql: "text LIKE ? ESCAPE '\\'", arguments: [pattern])
-                    .order(Column("createdAt").desc)
+                    .order(Column("lastSeenAt").desc)
                     .limit(2000)
                     .fetchAll(db)
             }
@@ -108,56 +142,107 @@ final class ClipStore: ObservableObject {
         }
     }
 
-    /// 3 秒内同文本 + 同来源视为重复，不再入库
-    func isRecentDuplicate(text: String, bundleID: String?) -> Bool {
-        let cutoff = Date().addingTimeInterval(-3)
-        var sql = "text = ? AND createdAt > ?"
-        var args: [DatabaseValueConvertible] = [text, cutoff]
-        if let bundleID {
-            sql += " AND appBundleID = ?"
-            args.append(bundleID)
-        }
-        let count = (try? dbQueue.read { db in
-            try Clip.filter(sql: sql, arguments: StatementArguments(args)).fetchCount(db)
-        }) ?? 0
-        return count > 0
-    }
-
     // MARK: - 写入
 
+    /// 保存（同文本合并去重）：已存在则计数 +1、更新 lastSeenAt 置顶并记录事件；否则新建
     @discardableResult
-    func insert(
+    func save(
         text: String,
         appName: String?,
         bundleID: String?,
         date: Date = Date()
     ) throws -> Clip {
         let words = text.components(separatedBy: .whitespacesAndNewlines).filter { !$0.isEmpty }
-        var clip = Clip(
-            id: nil,
-            text: text,
-            note: nil,
-            appName: appName,
-            appBundleID: bundleID,
-            wordCount: words.count,
-            createdAt: date
-        )
+        var result: Clip?
         try dbQueue.write { db in
-            try clip.insert(db)
+            if var existing = try Clip.filter(Column("text") == text).fetchOne(db) {
+                existing.count += 1
+                existing.lastSeenAt = date
+                try existing.update(db)
+                if let clipId = existing.id {
+                    let event = ClipEvent(
+                        id: nil,
+                        clipId: clipId,
+                        date: date,
+                        appName: appName,
+                        appBundleID: bundleID
+                    )
+                    try event.insert(db)
+                }
+                result = existing
+            } else {
+                var clip = Clip(
+                    id: nil,
+                    text: text,
+                    note: nil,
+                    appName: appName,
+                    appBundleID: bundleID,
+                    wordCount: words.count,
+                    createdAt: date,
+                    count: 1,
+                    lastSeenAt: date
+                )
+                try clip.insert(db)
+                if let clipId = clip.id {
+                    let event = ClipEvent(
+                        id: nil,
+                        clipId: clipId,
+                        date: date,
+                        appName: appName,
+                        appBundleID: bundleID
+                    )
+                    try event.insert(db)
+                }
+                result = clip
+            }
         }
         reload()
-        return clip
+        guard let saved = result else {
+            throw DatabaseError(resultCode: .SQLITE_ERROR, message: "Voca: 保存失败")
+        }
+        return saved
+    }
+
+    /// 某条记录的时间线（每次出现的时间与来源，倒序）
+    func events(for clip: Clip) -> [ClipEvent] {
+        guard let clipId = clip.id else { return [] }
+        return (try? dbQueue.read { db in
+            try ClipEvent
+                .filter(Column("clipId") == clipId)
+                .order(Column("date").desc)
+                .fetchAll(db)
+        }) ?? []
     }
 
     func delete(_ clip: Clip) {
         try? dbQueue.write { db in
+            if let clipId = clip.id {
+                try db.execute(
+                    sql: "DELETE FROM clip_events WHERE clipId = ?",
+                    arguments: [clipId]
+                )
+            }
             _ = try clip.delete(db)
+        }
+        reload()
+    }
+
+    /// 编辑已有记录的文本与备注（重算词数，保留来源与创建时间）
+    func update(_ clip: Clip, text: String, note: String?) {
+        var updated = clip
+        updated.text = text
+        updated.note = note
+        updated.wordCount = text.components(separatedBy: .whitespacesAndNewlines)
+            .filter { !$0.isEmpty }.count
+        try? dbQueue.write { db in
+            try updated.update(db)
         }
         reload()
     }
 
     func deleteAll() {
         try? dbQueue.write { db in
+            try db.execute(sql: "DELETE FROM clip_events")
             _ = try Clip.deleteAll(db)
         }
         reload()

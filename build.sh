@@ -22,6 +22,17 @@ for bundle in .build/release/*.bundle; do
     cp -R "$bundle" "$APP/Contents/Resources/"
 done
 
+# 代码签名：优先使用本地开发证书（稳定身份，重编译不掉辅助功能授权），否则 ad-hoc 兜底
+IDENTITY="Voca Development"
+if security find-identity -v -p codesigning 2>/dev/null | grep -q "$IDENTITY"; then
+    echo "==> codesign with $IDENTITY"
+    codesign --force --sign "$IDENTITY" "$APP"
+else
+    echo "==> codesign ad-hoc（未找到本地开发证书，辅助功能授权将在重编译后失效）"
+    codesign --force --sign - "$APP"
+fi
+codesign --verify --verbose "$APP" 2>&1 | tail -1
+
 cat > "$APP/Contents/Info.plist" <<'EOF'
 <?xml version="1.0" encoding="UTF-8"?>
 <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
