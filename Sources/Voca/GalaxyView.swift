@@ -20,6 +20,46 @@ import AppKit
 import SwiftUI
 import simd
 
+/// 星图实时调参（滑块面板驱动，UserDefaults 持久化）
+final class GalaxyTuning: ObservableObject {
+    static let shared = GalaxyTuning()
+
+    @Published var dispersion: Double { didSet { save("dispersion", dispersion) } }
+    @Published var chromaExponent: Double { didSet { save("chromaExponent", chromaExponent) } }
+    @Published var refraction: Double { didSet { save("refraction", refraction) } }
+    @Published var warpFalloff: Double { didSet { save("warpFalloff", warpFalloff) } }
+    @Published var rimStrength: Double { didSet { save("rimStrength", rimStrength) } }
+    @Published var fresnelTint: Double { didSet { save("fresnelTint", fresnelTint) } }
+    @Published var sphereScale: Double { didSet { save("sphereScale", sphereScale) } }
+    @Published var ringScale: Double { didSet { save("ringScale", ringScale) } }
+    @Published var coreDarkCenter: Double { didSet { save("coreDarkCenter", coreDarkCenter) } }
+    @Published var coreDarkEdge: Double { didSet { save("coreDarkEdge", coreDarkEdge) } }
+
+    init() {
+        let defaults = UserDefaults.standard
+        dispersion = defaults.object(forKey: "gt.dispersion") as? Double ?? 20
+        chromaExponent = defaults.object(forKey: "gt.chromaExponent") as? Double ?? 2.0
+        refraction = defaults.object(forKey: "gt.refraction") as? Double ?? 0.85
+        warpFalloff = defaults.object(forKey: "gt.warpFalloff") as? Double ?? 1.0
+        rimStrength = defaults.object(forKey: "gt.rimStrength") as? Double ?? 0.30
+        fresnelTint = defaults.object(forKey: "gt.fresnelTint") as? Double ?? 0.16
+        sphereScale = defaults.object(forKey: "gt.sphereScale") as? Double ?? 0.40
+        ringScale = defaults.object(forKey: "gt.ringScale") as? Double ?? 1.25
+        coreDarkCenter = defaults.object(forKey: "gt.coreDarkCenter") as? Double ?? 0.10
+        coreDarkEdge = defaults.object(forKey: "gt.coreDarkEdge") as? Double ?? 0.28
+    }
+
+    private func save(_ name: String, _ value: Double) {
+        UserDefaults.standard.set(value, forKey: "gt.\(name)")
+    }
+
+    func reset() {
+        dispersion = 20; chromaExponent = 2.0; refraction = 0.85; warpFalloff = 1.0
+        rimStrength = 0.30; fresnelTint = 0.16; sphereScale = 0.40; ringScale = 1.25
+        coreDarkCenter = 0.10; coreDarkEdge = 0.28
+    }
+}
+
 // MARK: - 球面数据
 
 struct GalaxyItem {
@@ -203,14 +243,16 @@ final class GalaxyWindowController {
 
 private struct GalaxyView: View {
     @ObservedObject var model: GalaxyModel
+    @ObservedObject private var tuning = GalaxyTuning.shared
     @EnvironmentObject private var store: ClipStore
     @EnvironmentObject private var watcher: ClipboardWatcher
     @State private var editingClip: Clip?
     @State private var timelineEvents: [ClipEvent] = []
+    @State private var showTuning = false
 
     var body: some View {
         GeometryReader { geometry in
-            let radius = min(geometry.size.width, geometry.size.height) * 0.30
+            let radius = min(geometry.size.width, geometry.size.height) * tuning.sphereScale
 
             ZStack {
                 sphere(diameter: radius * 2)
@@ -222,6 +264,17 @@ private struct GalaxyView: View {
                     hintBar
                 }
                 .padding(20)
+
+                if showTuning {
+                    tuningPanel
+                        .padding(.leading, 24)
+                        .frame(
+                            maxWidth: .infinity,
+                            maxHeight: .infinity,
+                            alignment: .topLeading
+                        )
+                        .padding(.top, 70)
+                }
 
                 if let clip = model.selectedClip {
                     HStack {
@@ -253,8 +306,8 @@ private struct GalaxyView: View {
     }
 
     private func sphere(diameter: CGFloat) -> some View {
-        // 球本体 = 磨砂核；外扩 1.4 倍直径为折射透镜环
-        let lensDiameter = diameter * 1.4
+        // 球本体 = 磨砂核；外扩环为折射透镜环
+        let lensDiameter = diameter * tuning.ringScale
         let radius = diameter / 2
         return ZStack {
             // 外环：Metal 折射透镜（捕获可用时呈现折射 + 色散）
@@ -263,7 +316,7 @@ private struct GalaxyView: View {
                 .frame(width: lensDiameter, height: lensDiameter)
                 .allowsHitTesting(false)
 
-            // 外环兜底：原生玻璃环，保证任何情况下都有透明折射感
+            // 外环兜底：原生玻璃环（捕获不可用时仍有玻璃感）
             Circle()
                 .fill(.clear)
                 .glassEffect(.clear, in: Circle())
@@ -277,7 +330,10 @@ private struct GalaxyView: View {
             Circle()
                 .fill(
                     RadialGradient(
-                        colors: [.black.opacity(0.10), .black.opacity(0.28)],
+                        colors: [
+                            .black.opacity(tuning.coreDarkCenter),
+                            .black.opacity(tuning.coreDarkEdge),
+                        ],
                         center: UnitPoint(x: 0.5, y: 0.45),
                         startRadius: 0,
                         endRadius: radius
@@ -346,6 +402,15 @@ private struct GalaxyView: View {
                 Spacer()
 
                 Button {
+                    showTuning.toggle()
+                } label: {
+                    Image(systemName: "slider.horizontal.3")
+                        .frame(width: 20, height: 20)
+                }
+                .buttonStyle(.glass)
+                .help("实时调参")
+
+                Button {
                     GalaxyWindowController.shared.close()
                 } label: {
                     Image(systemName: "xmark")
@@ -364,6 +429,67 @@ private struct GalaxyView: View {
             .padding(.horizontal, 16)
             .padding(.vertical, 9)
             .glassEffect(.regular, in: Capsule())
+    }
+
+    // MARK: 实时调参面板
+
+    private var tuningPanel: some View {
+        ScrollView {
+            VStack(alignment: .leading, spacing: 14) {
+                HStack {
+                    Label("实时调参", systemImage: "slider.horizontal.3")
+                        .font(.headline)
+                    Spacer()
+                    Button("重置") { tuning.reset() }
+                        .buttonStyle(.glass)
+                    Button {
+                        showTuning = false
+                    } label: {
+                        Image(systemName: "xmark")
+                    }
+                    .buttonStyle(.glass)
+                }
+
+                tuningSlider("色散强度", value: $tuning.dispersion, range: 0...30, format: "%.1f")
+                tuningSlider("色散分布", value: $tuning.chromaExponent, range: 1...4, format: "%.2f")
+                tuningSlider("折射扭曲", value: $tuning.refraction, range: 0...1, format: "%.2f")
+                tuningSlider("扭曲衰减", value: $tuning.warpFalloff, range: 0.4...2, format: "%.2f")
+                tuningSlider("边缘厚度", value: $tuning.rimStrength, range: 0...0.6, format: "%.2f")
+                tuningSlider("菲涅尔蓝", value: $tuning.fresnelTint, range: 0...0.4, format: "%.2f")
+
+                Divider()
+
+                tuningSlider("球体大小", value: $tuning.sphereScale, range: 0.25...0.48, format: "%.2f")
+                tuningSlider("环宽倍数", value: $tuning.ringScale, range: 1.05...1.6, format: "%.2f")
+                tuningSlider("磨砂中心暗度", value: $tuning.coreDarkCenter, range: 0...0.4, format: "%.2f")
+                tuningSlider("磨砂边缘暗度", value: $tuning.coreDarkEdge, range: 0...0.6, format: "%.2f")
+            }
+            .padding(18)
+        }
+        .frame(width: 250)
+        .frame(maxHeight: 430)
+        .glassEffect(
+            .regular.interactive(),
+            in: RoundedRectangle(cornerRadius: 20, style: .continuous)
+        )
+    }
+
+    private func tuningSlider(
+        _ title: String,
+        value: Binding<Double>,
+        range: ClosedRange<Double>,
+        format: String
+    ) -> some View {
+        VStack(alignment: .leading, spacing: 4) {
+            HStack {
+                Text(title).font(.caption)
+                Spacer()
+                Text(String(format: format, value.wrappedValue))
+                    .font(.caption.monospacedDigit())
+                    .foregroundStyle(.secondary)
+            }
+            Slider(value: value, in: range)
+        }
     }
 
     // MARK: 详情面板

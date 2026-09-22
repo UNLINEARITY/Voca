@@ -132,7 +132,7 @@ Current structure in `GalaxyView.sphere(diameter:)`, outer→inner:
 3. **Frosted core** (sphere diameter): `.ultraThinMaterial` + radial dark-bias gradient (`black 0.10 → 0.28`), top-left highlight (`white 0.22`), rim stroke — always readable, zero permissions.
 4. **SceneKit word sphere** (`GalaxySphereView`) — curved ribbon labels, font size = save count, morpher-based zoom (0.5–2.5×, persisted), auto-rotate 0.06 rad/s with inertia drag.
 
-Tuning knobs: sphere radius factor `0.30` (of min view dimension), lens scale `1.4×`, dark-bias endpoints, material thickness. Known open items: word hit-testing still uses `SCNView.hitTest` (a projection-based fix exists in session history if precision complaints return); per-word ink adaptation was prototyped and reverted; search highlighting / entrance animations still candidates.
+Tuning: a live panel (slider icon in the galaxy top bar) exposes ten persisted parameters via the `GalaxyTuning` singleton — dispersion, chroma exponent, refraction warp/falloff, rim strength, fresnel tint, sphere scale, ring scale, and frosted-core center/edge darkening. Metal-side values ride a `tuning` float4 uniform each frame; defaults are the owner-approved preset. **Known open issue**: in `open`-launched sessions the Metal lens still does not composite even after a re-granted Screen Recording permission (native glass ring carries the look); the panel and all parameters are verified working and will drive the lens once capture delivers frames.
 
 ## Workflow Contract (from the human owner)
 

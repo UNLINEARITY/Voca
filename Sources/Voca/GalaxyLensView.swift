@@ -97,6 +97,8 @@ private struct GalaxyLensUniforms {
     var refraction: Float = 0.29
     var dispersion: Float = 1.35
     var padding: Float = 0
+    /// x=色散分布指数 y=扭曲衰减 z=边缘厚度 w=菲涅尔蓝调
+    var tuning = SIMD4<Float>(2.0, 1.0, 0.30, 0.16)
 }
 
 private final class GalaxyLensRenderer: NSObject, MTKViewDelegate, SCStreamOutput, SCStreamDelegate {
@@ -358,15 +360,22 @@ private final class GalaxyLensRenderer: NSObject, MTKViewDelegate, SCStreamOutpu
             Float(((mouse.y - screenRect.midY) / max(screenRect.height * 0.5, 1)).clamped(to: -1...1))
         )
 
+        let tuning = GalaxyTuning.shared
         return GalaxyLensUniforms(
             lensOrigin: origin,
             lensSize: size,
             captureSize: SIMD2<Float>(Float(textureWidth), Float(textureHeight)),
             pointer: pointer,
             time: Float(CACurrentMediaTime() - startedAt),
-            refraction: 0.29,
-            dispersion: 1.35,
-            padding: 0
+            refraction: Float(tuning.refraction),
+            dispersion: Float(tuning.dispersion),
+            padding: 0,
+            tuning: SIMD4(
+                Float(tuning.chromaExponent),
+                Float(tuning.warpFalloff),
+                Float(tuning.rimStrength),
+                Float(tuning.fresnelTint)
+            )
         )
     }
 
@@ -399,6 +408,7 @@ private final class GalaxyLensRenderer: NSObject, MTKViewDelegate, SCStreamOutpu
         float refraction;
         float dispersion;
         float padding;
+        float4 tuning; // x=chromaExponent y=warpFalloff z=rimStrength w=fresnelTint
     };
 
     vertex LensVertexOut galaxyLensVertex(uint vertexID [[vertex_id]]) {
@@ -439,7 +449,7 @@ private final class GalaxyLensRenderer: NSObject, MTKViewDelegate, SCStreamOutpu
         // A convex lens samples points closer to its optical axis. The mapping
         // joins the unmodified background at the rim to avoid a visible seam.
         float magnification = 1.0 - uniforms.refraction
-            * pow(1.0 - radius, 1.18)
+            * pow(1.0 - radius, uniforms.tuning.y)
             * (0.78 + 0.22 * depth);
         float2 refractedPoint = p * magnification;
         float2 localSample = refractedPoint * 0.5 + 0.5;
@@ -449,7 +459,7 @@ private final class GalaxyLensRenderer: NSObject, MTKViewDelegate, SCStreamOutpu
         // Physically restrained chromatic aberration is concentrated near the
         // rim, where a thick glass sphere separates wavelengths most visibly.
         float2 radialDirection = p / max(radius, 0.001);
-        float chroma = uniforms.dispersion * pow(radius, 3.4);
+        float chroma = uniforms.dispersion * pow(radius, uniforms.tuning.x);
         float2 chromaUV = radialDirection * chroma / uniforms.captureSize;
         half red = capturedFrame.sample(frameSampler, screenUV + chromaUV).r;
         half green = capturedFrame.sample(frameSampler, screenUV).g;
@@ -476,15 +486,15 @@ private final class GalaxyLensRenderer: NSObject, MTKViewDelegate, SCStreamOutpu
             * smoothstep(0.2, 0.75, radius);
 
         color *= half(1.0 - fresnel * 0.075);
-        color += half3(0.23, 0.30, 0.38) * half(fresnel * 0.16);
+        color += half3(0.23, 0.30, 0.38) * half(fresnel * uniforms.tuning.w);
         color += half3(1.0, 0.97, 0.90) * half(sharpHighlight * 0.48);
         color += half3(0.30, 0.38, 0.48) * half(softHighlight * 0.055);
         color += half3(0.48, 0.67, 0.82) * half(caustic * 0.075);
 
         // Darken only the final inner millimetres to make the glass thickness
         // legible while keeping the sphere itself optically transparent.
-        float innerRim = smoothstep(0.965, 0.998, radius);
-        color *= half(1.0 - innerRim * 0.16);
+        float innerRim = smoothstep(0.90, 0.998, radius);
+        color *= half(1.0 - innerRim * uniforms.tuning.z);
         return half4(color, 1.0);
     }
     """#
