@@ -317,6 +317,14 @@ struct ClipRow: View {
                 .truncationMode(.tail)
                 .textSelection(.enabled)
 
+            // 备注浅灰显示，行数跟随备注本身（不截断）
+            if let note = clip.note, !note.isEmpty {
+                Text(note)
+                    .font(.system(size: 12))
+                    .foregroundStyle(.secondary)
+                    .textSelection(.enabled)
+            }
+
             HStack(spacing: 8) {
                 Label(clip.appName ?? "未知来源", systemImage: "app.dashed")
                 if clip.count > 1 {
@@ -404,22 +412,18 @@ struct EditClipSheet: View {
     }
 
     var body: some View {
-        VStack(alignment: .leading, spacing: 12) {
+        VStack(alignment: .leading, spacing: 10) {
             Text("编辑记录").font(.headline)
 
-            TextEditor(text: $text)
-                .font(.system(size: 13))
-                .frame(minHeight: 200)
-                .padding(4)
-                .background(Color(nsColor: .textBackgroundColor))
-                .cornerRadius(6)
-                .overlay(
-                    RoundedRectangle(cornerRadius: 6)
-                        .strokeBorder(.quaternary, lineWidth: 1)
-                )
+            VStack(alignment: .leading, spacing: 4) {
+                Text("内容").font(.caption).foregroundStyle(.secondary)
+                editor(text: $text)
+            }
 
-            TextField("备注（可选）", text: $note)
-                .textFieldStyle(.roundedBorder)
+            VStack(alignment: .leading, spacing: 4) {
+                Text("备注（可选）").font(.caption).foregroundStyle(.secondary)
+                editor(text: $note)
+            }
 
             HStack {
                 Button("取消") {
@@ -436,7 +440,21 @@ struct EditClipSheet: View {
             }
         }
         .padding(16)
-        .frame(width: 460, height: 380)
+        .frame(width: 460, height: 440)
+    }
+
+    /// 多行编辑框：与其他编辑区均分空间，内容过多时内部滚动
+    private func editor(text: Binding<String>) -> some View {
+        TextEditor(text: text)
+            .font(.system(size: 13))
+            .frame(maxHeight: .infinity)
+            .padding(4)
+            .background(Color(nsColor: .textBackgroundColor))
+            .cornerRadius(6)
+            .overlay(
+                RoundedRectangle(cornerRadius: 6)
+                    .strokeBorder(.quaternary, lineWidth: 1)
+            )
     }
 }
 
