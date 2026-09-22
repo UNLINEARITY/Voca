@@ -23,6 +23,7 @@ import UniformTypeIdentifiers
 
 extension KeyboardShortcuts.Name {
     static let saveSelection = Self("saveSelection")
+    static let openGalaxy = Self("openGalaxy")
 }
 
 @MainActor
@@ -85,6 +86,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         KeyboardShortcuts.onKeyUp(for: .saveSelection) {
             AppModel.shared.handleHotkey()
         }
+        KeyboardShortcuts.onKeyUp(for: .openGalaxy) {
+            GalaxyWindowController.shared.toggle()
+        }
     }
 }
 
@@ -95,11 +99,17 @@ struct VocaApp: App {
 
     init() {
         NSApplication.shared.setActivationPolicy(.accessory)
-        // 首次启动给默认快捷键 ⌥⇧S，用户可随时在菜单栏改
+        // 首次启动给默认快捷键，用户可随时在菜单栏改
         if KeyboardShortcuts.getShortcut(for: .saveSelection) == nil {
             KeyboardShortcuts.setShortcut(
                 KeyboardShortcuts.Shortcut(.s, modifiers: [.option, .shift]),
                 for: .saveSelection
+            )
+        }
+        if KeyboardShortcuts.getShortcut(for: .openGalaxy) == nil {
+            KeyboardShortcuts.setShortcut(
+                KeyboardShortcuts.Shortcut(.v, modifiers: [.option, .shift]),
+                for: .openGalaxy
             )
         }
     }
@@ -152,12 +162,20 @@ struct MenuBarView: View {
             Divider()
 
             KeyboardShortcuts.Recorder("保存快捷键：", name: .saveSelection)
+            KeyboardShortcuts.Recorder("星图快捷键：", name: .openGalaxy)
 
             Toggle(isOn: $watcher.isEnabled) {
                 Label("记录剪贴板历史", systemImage: "doc.on.clipboard")
             }
 
             Divider()
+
+            Button {
+                GalaxyWindowController.shared.toggle()
+            } label: {
+                Label("星图模式", systemImage: "sparkles")
+                    .frame(maxWidth: .infinity, alignment: .leading)
+            }
 
             Button {
                 openWindow(id: "records")
