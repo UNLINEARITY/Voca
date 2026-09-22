@@ -22,17 +22,6 @@ for bundle in .build/release/*.bundle; do
     cp -R "$bundle" "$APP/Contents/Resources/"
 done
 
-# 代码签名：优先使用本地开发证书（稳定身份，重编译不掉辅助功能授权），否则 ad-hoc 兜底
-IDENTITY="Voca Development"
-if security find-identity -v -p codesigning 2>/dev/null | grep -q "$IDENTITY"; then
-    echo "==> codesign with $IDENTITY"
-    codesign --force --sign "$IDENTITY" "$APP"
-else
-    echo "==> codesign ad-hoc（未找到本地开发证书，辅助功能授权将在重编译后失效）"
-    codesign --force --sign - "$APP"
-fi
-codesign --verify --verbose "$APP" 2>&1 | tail -1
-
 cat > "$APP/Contents/Info.plist" <<'EOF'
 <?xml version="1.0" encoding="UTF-8"?>
 <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
@@ -53,16 +42,30 @@ cat > "$APP/Contents/Info.plist" <<'EOF'
     <key>CFBundleVersion</key>
     <string>1</string>
     <key>LSMinimumSystemVersion</key>
-    <string>14.0</string>
+    <string>26.0</string>
     <key>LSUIElement</key>
     <true/>
     <key>NSAppleEventsUsageDescription</key>
     <string>Voca 在保存来自浏览器的选中文字时，读取当前标签页网址作为来源记录。</string>
+    <key>NSScreenCaptureUsageDescription</key>
+    <string>Voca 仅在打开星图时读取当前屏幕，以实时呈现玻璃球的透镜折射；画面只在内存中处理，不会保存。</string>
     <key>NSHumanReadableCopyright</key>
     <string>Personal use</string>
 </dict>
 </plist>
 EOF
+
+# 代码签名必须在全部 bundle 内容写入后执行，否则后写入的 Info.plist 会破坏签名。
+# 优先使用本地开发证书（稳定身份，重编译不掉隐私权限），否则 ad-hoc 兜底。
+IDENTITY="Voca Development"
+if security find-identity -v -p codesigning 2>/dev/null | grep -q "$IDENTITY"; then
+    echo "==> codesign with $IDENTITY"
+    codesign --force --sign "$IDENTITY" "$APP"
+else
+    echo "==> codesign ad-hoc（未找到本地开发证书，隐私权限将在重编译后失效）"
+    codesign --force --sign - "$APP"
+fi
+codesign --verify --verbose "$APP" 2>&1 | tail -1
 
 echo "✅ 构建完成：$APP"
 echo "   启动：open $APP"

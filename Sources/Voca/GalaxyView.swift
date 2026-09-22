@@ -7,9 +7,9 @@
 // your option) any later version.
 //
 // This program is distributed in the hope that it will be useful, but
-// WITHOUT ANY WARRANTY; without even the implied warranty of
-// MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE. See the GNU Affero
-// General Public License for more details.
+// WITHOUT ANY WARRANTY; without even the implied warranty of MERCHANTABILITY
+// or FITNESS FOR A PARTICULAR PURPOSE. See the GNU Affero General Public
+// License for more details.
 //
 // You should have received a copy of the GNU Affero General Public License
 // along with this program. If not, see <https://www.gnu.org/licenses/>.
@@ -18,29 +18,25 @@
 
 import AppKit
 import SwiftUI
+import simd
 
-// MARK: - 球面条目
+// MARK: - 球面数据
 
 struct GalaxyItem {
     let clipId: Int64
-    let label: String
+    let text: String
     let fontSize: CGFloat
     let clip: Clip
-    let position: SIMD3<Double> // 单位球面坐标
+    let position: SIMD3<Float>
 }
-
-// MARK: - 球模型（旋转/惯性/自转/命中）
 
 @MainActor
 final class GalaxyModel: ObservableObject {
     static let maxItems = 400
-    private static let baseAutoRotate: Double = 0.06 // rad/s 空闲自转
 
     @Published private(set) var items: [GalaxyItem] = []
     @Published var selectedClip: Clip?
-
-    /// 字号全局缩放（滚轮/捏合调节，持久化）
-    var fontScale: Double {
+    @Published var fontScale: Double {
         didSet { UserDefaults.standard.set(fontScale, forKey: "galaxyFontScale") }
     }
 
@@ -48,20 +44,6 @@ final class GalaxyModel: ObservableObject {
         fontScale = UserDefaults.standard.object(forKey: "galaxyFontScale") as? Double
             ?? 1.0
     }
-
-    func zoom(by factor: Double) {
-        fontScale = (fontScale * factor).clamped(to: 0.5...2.5)
-    }
-
-    var yaw: Double = 0
-    var pitch: Double = 0
-    private var yawVelocity = GalaxyModel.baseAutoRotate
-    private var pitchVelocity: Double = 0
-
-    private var lastFrameTime: Double?
-    private var lastDrag: (point: CGPoint, time: Double)?
-    // 上一帧投影结果（主线程读写，点击命中用）
-    var hitTargets: [(item: GalaxyItem, center: CGPoint)] = []
 
     func rebuild(from clips: [Clip]) {
         let sampled: [Clip]
@@ -76,204 +58,150 @@ final class GalaxyModel: ObservableObject {
             sampled = clips
         }
 
-        let n = sampled.count
-        let goldenAngle = Double.pi * (3.0 - sqrt(5.0))
-        var result: [GalaxyItem] = []
-        result.reserveCapacity(n)
-        for (index, clip) in sampled.enumerated() {
-            // 斐波那契球面格点：均匀无聚簇
-            let y = 1.0 - 2.0 * (Double(index) + 0.5) / Double(n)
-            let r = sqrt(max(0, 1 - y * y))
-            let theta = goldenAngle * Double(index)
-            let label = Self.displayLabel(clip.text)
-            result.append(
-                GalaxyItem(
-                    clipId: clip.id ?? 0,
-                    label: label,
-                    fontSize: Self.fontSize(for: clip.count),
-                    clip: clip,
-                    position: SIMD3(r * cos(theta), y, r * sin(theta))
+        let count = sampled.count
+        guard count > 0 else {
+            items = []
+            selectedClip = nil
+            return
+        }
+
+        let goldenAngle = Float.pi * (3.0 - sqrt(5.0))
+        items = sampled.enumerated().map { index, clip in
+            let y = 1.0 - 2.0 * (Float(index) + 0.5) / Float(count)
+            let horizontalRadius = sqrt(max(0, 1 - y * y))
+            let theta = goldenAngle * Float(index)
+            return GalaxyItem(
+                clipId: clip.id ?? 0,
+                text: Self.displayText(clip.text),
+                fontSize: Self.fontSize(for: clip.count),
+                clip: clip,
+                position: SIMD3(
+                    horizontalRadius * cos(theta),
+                    y,
+                    horizontalRadius * sin(theta)
                 )
             )
         }
-        items = result
         selectedClip = nil
     }
 
-    func refreshSelection(in clips: [Clip]) {
-        guard let selected = selectedClip, let id = selected.id else { return }
-        selectedClip = clips.first { $0.id == id }
+    func zoom(by factor: Double) {
+        fontScale = (fontScale * factor).clamped(to: 0.5...2.5)
     }
 
-    // MARK: 帧推进
-
-    func step(now: Double) {
-        let dt = min(0.05, lastFrameTime.map { now - $0 } ?? 1.0 / 60.0)
-        lastFrameTime = now
-
-        yaw += yawVelocity * dt
-        pitch += pitchVelocity * dt
-        pitch = pitch.clamped(to: -1.35...1.35)
-
-        // 惯性衰减；yaw 缓慢回归自转基速，pitch 归零
-        yawVelocity = Self.baseAutoRotate
-            + (yawVelocity - Self.baseAutoRotate) * pow(0.05, dt)
-        pitchVelocity *= pow(0.02, dt)
-    }
-
-    func rotatedPosition(_ p: SIMD3<Double>) -> SIMD3<Double> {
-        let cy = cos(yaw), sy = sin(yaw)
-        let cp = cos(pitch), sp = sin(pitch)
-        // 先绕 Y 轴（yaw），再绕 X 轴（pitch）
-        let x1 = p.x * cy + p.z * sy
-        let z1 = -p.x * sy + p.z * cy
-        let y2 = p.y * cp - z1 * sp
-        let z2 = p.y * sp + z1 * cp
-        return SIMD3(x1, y2, z2)
-    }
-
-    // MARK: 拖拽
-
-    func dragChanged(_ point: CGPoint, time: Double) {
-        defer { lastDrag = (point, time) }
-        guard let last = lastDrag else { return }
-        let dx = Double(point.x - last.point.x)
-        let dy = Double(point.y - last.point.y)
-        let dt = max(0.008, time - last.time)
-        yaw -= dx * 0.005
-        pitch += dy * 0.005
-        pitch = pitch.clamped(to: -1.35...1.35)
-        yawVelocity = -dx * 0.005 / dt
-        pitchVelocity = dy * 0.005 / dt
-    }
-
-    func dragEnded() {
-        lastDrag = nil
-        // 限制惯性上限，避免甩飞
-        yawVelocity = yawVelocity.clamped(to: -4...4)
-        pitchVelocity = pitchVelocity.clamped(to: -4...4)
-    }
-
-    // MARK: 命中
-
-    func hitTest(_ point: CGPoint) -> GalaxyItem? {
-        var best: (item: GalaxyItem, center: CGPoint, distance: CGFloat)?
-        for target in hitTargets {
-            let d = hypot(target.center.x - point.x, target.center.y - point.y)
-            let tolerance = target.item.fontSize + 10
-            if d < tolerance, d < (best?.distance ?? .greatestFiniteMagnitude) {
-                best = (target.item, target.center, d)
-            }
-        }
-        return best?.item
-    }
-
-    // MARK: - 映射
-
-    /// 字号 = 频次：13pt 起步，对数增长封顶 30pt
     static func fontSize(for count: Int) -> CGFloat {
         13 + min(17.0, log2(Double(max(count, 1))) * 4.5)
     }
 
-    /// 展示标签：首行、折叠空白、截断 14 字符
-    static func displayLabel(_ text: String) -> String {
-        let first = text.split(whereSeparator: \.isNewline).first.map(String.init) ?? text
-        let collapsed = first.replacingOccurrences(
-            of: #"\s+"#, with: " ", options: .regularExpression
-        )
-        return collapsed.count > 14 ? String(collapsed.prefix(14)) + "…" : collapsed
+    static func displayText(_ text: String) -> String {
+        text
+            .replacingOccurrences(of: #"\s+"#, with: " ", options: .regularExpression)
+            .trimmingCharacters(in: .whitespacesAndNewlines)
     }
 }
 
 // MARK: - 全屏窗口控制器
 
+private final class GalaxyWindow: NSWindow {
+    override var canBecomeKey: Bool { true }
+    override var canBecomeMain: Bool { true }
+}
+
 @MainActor
 final class GalaxyWindowController {
     static let shared = GalaxyWindowController()
+
     private var window: NSWindow?
     private var eventMonitor: Any?
-    private(set) var model = GalaxyModel()
+    private var model = GalaxyModel()
 
-    var isOpen: Bool { window != nil }
+    var isOpen: Bool { window?.isVisible == true }
 
     func toggle() {
         isOpen ? close() : open()
     }
 
     func open() {
-        guard window == nil else {
-            window?.makeKeyAndOrderFront(nil)
-            return
-        }
         model.rebuild(from: AppModel.shared.store.clips)
+        let screenFrame = NSScreen.main?.visibleFrame
+            ?? NSRect(x: 0, y: 0, width: 1200, height: 800)
 
-        let contentView = GalaxyView(model: model)
-            .environmentObject(AppModel.shared.store)
-            .environmentObject(AppModel.shared.clipboardWatcher)
-        let w = NSWindow(
-            contentRect: NSScreen.main?.visibleFrame ?? NSRect(x: 0, y: 0, width: 1200, height: 800),
-            styleMask: [.borderless, .fullSizeContentView],
-            backing: .buffered,
-            defer: false
-        )
-        // 直接设 contentView 而非 contentViewController：
-        // 后者会把窗口自适应到 SwiftUI 视图的理想尺寸（Canvas 无固有尺寸 → 缩成一小块）
-        w.contentView = NSHostingView(rootView: contentView)
-        // 显式撑满屏幕，居中铺开
-        w.setFrame(NSScreen.main?.visibleFrame ?? w.frame, display: true)
-        // 透明窗口：桌面可见，液态玻璃球体悬浮其上
-        w.isOpaque = false
-        w.backgroundColor = .clear
-        w.hasShadow = false
-        w.identifier = NSUserInterfaceItemIdentifier("voca.galaxy")
-        w.makeKeyAndOrderFront(nil)
-        NSApp.activate(ignoringOtherApps: true)
-        window = w
-
-        eventMonitor = NSEvent.addLocalMonitorForEvents(
-            matching: [.keyDown, .scrollWheel, .magnify]
-        ) { [weak self] event in
-            guard let self, self.window != nil else { return event }
-            switch event.type {
-            case .keyDown where event.keyCode == 53: // ESC
-                if self.model.selectedClip != nil {
-                    self.model.selectedClip = nil
-                } else {
-                    // 必须异步：在监视器回调内同步 removeMonitor 会导致
-                    // 监视器对象在调用中途被释放 → objc_release 段错误
-                    DispatchQueue.main.async {
-                        GalaxyWindowController.shared.close()
-                    }
-                }
-                return nil
-            case .scrollWheel:
-                let delta = event.scrollingDeltaY
-                if delta != 0 {
-                    self.model.zoom(by: pow(1.15, delta))
-                }
-                return nil
-            case .magnify:
-                self.model.zoom(by: 1 + event.magnification * 1.2)
-                return nil
-            default:
-                return event
-            }
+        let window: NSWindow
+        if let existingWindow = self.window {
+            window = existingWindow
+            window.setFrame(screenFrame, display: true)
+            setGalaxyRendering(paused: false, in: window.contentView)
+        } else {
+            let contentView = GalaxyView(model: model)
+                .environmentObject(AppModel.shared.store)
+                .environmentObject(AppModel.shared.clipboardWatcher)
+            window = GalaxyWindow(
+                contentRect: screenFrame,
+                styleMask: [.borderless, .fullSizeContentView],
+                backing: .buffered,
+                defer: false
+            )
+            window.contentView = NSHostingView(rootView: contentView)
+            window.isReleasedWhenClosed = false
+            window.isOpaque = false
+            window.backgroundColor = .clear
+            window.hasShadow = false
+            window.identifier = NSUserInterfaceItemIdentifier("voca.galaxy")
+            self.window = window
         }
+
+        installEventMonitor()
+        window.makeKeyAndOrderFront(nil)
+        NSApp.activate(ignoringOtherApps: true)
     }
 
     func close() {
+        removeEventMonitor()
+        guard let window else { return }
+        setGalaxyRendering(paused: true, in: window.contentView)
+        model.selectedClip = nil
+        window.orderOut(nil)
+    }
+
+    private func installEventMonitor() {
+        removeEventMonitor()
+        eventMonitor = NSEvent.addLocalMonitorForEvents(matching: .keyDown) {
+            [weak self] event in
+            guard let self, self.isOpen, event.keyCode == 53 else { return event }
+            if self.model.selectedClip != nil {
+                self.model.selectedClip = nil
+            } else {
+                DispatchQueue.main.async {
+                    GalaxyWindowController.shared.close()
+                }
+            }
+            return nil
+        }
+    }
+
+    private func removeEventMonitor() {
         if let eventMonitor {
             NSEvent.removeMonitor(eventMonitor)
         }
         eventMonitor = nil
-        window?.close()
-        window = nil
+    }
+
+    private func setGalaxyRendering(paused: Bool, in view: NSView?) {
+        guard let view else { return }
+        if let sceneView = view as? GalaxySceneView {
+            paused ? sceneView.pauseRendering() : sceneView.resumeRendering()
+        } else if let lensView = view as? GalaxyLensMetalView {
+            paused ? lensView.pauseRendering() : lensView.resumeRendering()
+        }
+        for subview in view.subviews {
+            setGalaxyRendering(paused: paused, in: subview)
+        }
     }
 }
 
 // MARK: - 星图视图
 
-struct GalaxyView: View {
+private struct GalaxyView: View {
     @ObservedObject var model: GalaxyModel
     @EnvironmentObject private var store: ClipStore
     @EnvironmentObject private var watcher: ClipboardWatcher
@@ -281,77 +209,35 @@ struct GalaxyView: View {
     @State private var timelineEvents: [ClipEvent] = []
 
     var body: some View {
-        ZStack {
-            // 液态玻璃球体：材质模糊桌面，文字浮于其上
-            GeometryReader { geo in
-                let radius = min(geo.size.width, geo.size.height) * 0.36
-                ZStack {
-                    Circle()
-                        .fill(.ultraThinMaterial)
-                        .shadow(color: .white.opacity(0.12), radius: 40)
-                    // 左上高光，玻璃质感
-                    Circle()
-                        .fill(
-                            RadialGradient(
-                                colors: [.white.opacity(0.28), .clear],
-                                center: UnitPoint(x: 0.32, y: 0.28),
-                                startRadius: 0,
-                                endRadius: radius
-                            )
-                        )
-                    // 边缘光
-                    Circle()
-                        .strokeBorder(
-                            LinearGradient(
-                                colors: [.white.opacity(0.55), .white.opacity(0.06)],
-                                startPoint: .topLeading,
-                                endPoint: .bottomTrailing
-                            ),
-                            lineWidth: 1.5
-                        )
-                }
-                .frame(width: radius * 2, height: radius * 2)
-                .position(x: geo.size.width / 2, y: geo.size.height / 2)
-            }
+        GeometryReader { geometry in
+            let radius = min(geometry.size.width, geometry.size.height) * 0.36
 
-            TimelineView(.animation) { timeline in
-                Canvas { context, size in
-                    draw(in: &context, size: size, now: timeline.date.timeIntervalSinceReferenceDate)
-                }
-            }
+            ZStack {
+                sphere(diameter: radius * 2)
+                    .position(x: geometry.size.width / 2, y: geometry.size.height / 2)
 
-            VStack {
-                topBar
-                Spacer()
-                hintBar
-            }
-
-            if let clip = model.selectedClip {
-                HStack(alignment: .top, spacing: 0) {
+                VStack {
+                    topBar
                     Spacer()
-                    detailPanel(clip)
-                        .padding(24)
+                    hintBar
+                }
+                .padding(20)
+
+                if let clip = model.selectedClip {
+                    HStack {
+                        Spacer()
+                        detailPanel(
+                            clip,
+                            maximumHeight: min(geometry.size.height - 128, 680)
+                        )
+                        .padding(.trailing, 24)
+                    }
+                    .transition(.move(edge: .trailing).combined(with: .opacity))
                 }
             }
+            .animation(.snappy(duration: 0.28), value: model.selectedClip?.id)
         }
         .background(.clear)
-        .gesture(
-            DragGesture(minimumDistance: 4)
-                .onChanged { value in
-                    model.dragChanged(
-                        value.location,
-                        time: Date().timeIntervalSinceReferenceDate
-                    )
-                }
-                .onEnded { _ in model.dragEnded() }
-        )
-        .onTapGesture { location in
-            if let item = model.hitTest(location) {
-                model.selectedClip = item.clip
-            } else {
-                model.selectedClip = nil
-            }
-        }
         .onChange(of: model.selectedClip) { _, clip in
             timelineEvents = clip.map { store.events(for: $0) } ?? []
         }
@@ -366,239 +252,285 @@ struct GalaxyView: View {
         }
     }
 
-    // MARK: 顶部/底部提示
+    private func sphere(diameter: CGFloat) -> some View {
+        ZStack {
+            Circle()
+                .glassEffect(.clear, in: Circle())
+                .padding(diameter * 0.03)
+
+            GalaxyLensView()
+                .clipShape(Circle())
+                .padding(diameter * 0.03)
+                .allowsHitTesting(false)
+
+            if model.items.isEmpty {
+                ContentUnavailableView(
+                    "星图还是空的",
+                    systemImage: "sparkles",
+                    description: Text("保存一些文字后，它们会出现在这里。")
+                )
+                .frame(maxWidth: diameter * 0.56)
+            } else {
+                GalaxySphereView(model: model)
+            }
+        }
+        .frame(width: diameter, height: diameter)
+    }
+
+    // MARK: 顶部与提示
 
     private var topBar: some View {
-        HStack(spacing: 12) {
-            Label("Voca 星图", systemImage: "sparkles")
-                .font(.headline)
-                .foregroundStyle(.white.opacity(0.9))
-                .shadow(color: .black.opacity(0.7), radius: 2)
-            Text("\(model.items.count) 条")
-                .font(.caption)
-                .foregroundStyle(.white.opacity(0.55))
-                .shadow(color: .black.opacity(0.7), radius: 2)
-            Spacer()
-            Button {
-                GalaxyWindowController.shared.close()
-            } label: {
-                Image(systemName: "xmark.circle.fill")
-                    .font(.title2)
-                    .foregroundStyle(.white.opacity(0.6))
-                    .shadow(color: .black.opacity(0.7), radius: 2)
+        GlassEffectContainer(spacing: 12) {
+            HStack(spacing: 12) {
+                HStack(spacing: 9) {
+                    Image(systemName: "sparkles")
+                    Text("Voca 星图")
+                        .fontWeight(.semibold)
+                    Text("\(model.items.count) 条")
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                }
+                .padding(.leading, 15)
+                .padding(.trailing, 17)
+                .padding(.vertical, 10)
+                .glassEffect(.regular, in: Capsule())
+
+                Spacer()
+
+                Button {
+                    GalaxyWindowController.shared.close()
+                } label: {
+                    Image(systemName: "xmark")
+                        .frame(width: 20, height: 20)
+                }
+                .buttonStyle(.glass)
+                .help("退出星图（ESC）")
             }
-            .buttonStyle(.plain)
-            .help("退出星图（ESC）")
         }
-        .padding(20)
     }
 
     private var hintBar: some View {
         Text("拖拽旋转 · 滚轮/捏合缩放字号 · 点击词条查看详情 · ESC 退出")
             .font(.caption)
-            .foregroundStyle(.white.opacity(0.45))
-            .shadow(color: .black.opacity(0.7), radius: 2)
-            .padding(.bottom, 18)
+            .foregroundStyle(.secondary)
+            .padding(.horizontal, 16)
+            .padding(.vertical, 9)
+            .glassEffect(.regular, in: Capsule())
     }
 
-    // MARK: 详情面板（时间线内嵌直出）
+    // MARK: 详情面板
 
-    private func detailPanel(_ clip: Clip) -> some View {
-        VStack(alignment: .leading, spacing: 10) {
-            Text(clip.text)
-                .font(.system(size: 14))
-                .foregroundStyle(.primary)
-                .textSelection(.enabled)
+    private func detailPanel(_ clip: Clip, maximumHeight: CGFloat) -> some View {
+        VStack(spacing: 0) {
+            ScrollView {
+                VStack(alignment: .leading, spacing: 0) {
+                    detailHeader(clip)
 
-            if let note = clip.note, !note.isEmpty {
-                Text(note)
-                    .font(.system(size: 12))
-                    .foregroundStyle(.secondary)
-                    .textSelection(.enabled)
+                    if let note = clip.note, !note.isEmpty {
+                        noteSection(note)
+                            .padding(.top, 16)
+                    }
+
+                    metadataSection(clip)
+                        .padding(.vertical, 15)
+
+                    Divider()
+
+                    timelineSection
+                        .padding(.top, 15)
+                }
+                .padding(.horizontal, 18)
+                .padding(.top, 18)
+                .padding(.bottom, 12)
             }
 
             Divider()
+                .padding(.horizontal, 18)
 
-            HStack(spacing: 8) {
+            detailActions(clip)
+                .padding(18)
+        }
+        .frame(width: 390)
+        .frame(maxHeight: maximumHeight)
+        .glassEffect(
+            .regular.interactive(),
+            in: RoundedRectangle(cornerRadius: 24, style: .continuous)
+        )
+    }
+
+    private func detailHeader(_ clip: Clip) -> some View {
+        HStack(alignment: .top, spacing: 12) {
+            VStack(alignment: .leading, spacing: 5) {
+                Text("词条详情")
+                    .font(.caption.weight(.semibold))
+                    .foregroundStyle(.secondary)
+                Text(clip.text)
+                    .font(.title3.weight(.medium))
+                    .fixedSize(horizontal: false, vertical: true)
+                    .textSelection(.enabled)
+            }
+
+            Spacer(minLength: 0)
+
+            Button {
+                model.selectedClip = nil
+            } label: {
+                Image(systemName: "xmark")
+            }
+            .buttonStyle(.glass)
+            .help("关闭（ESC）")
+        }
+    }
+
+    private func noteSection(_ note: String) -> some View {
+        VStack(alignment: .leading, spacing: 7) {
+            Label("注释", systemImage: "quote.opening")
+                .font(.caption.weight(.semibold))
+                .foregroundStyle(.secondary)
+            Text(note)
+                .font(.callout)
+                .fixedSize(horizontal: false, vertical: true)
+                .textSelection(.enabled)
+        }
+        .padding(12)
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .background(
+            .white.opacity(0.07),
+            in: RoundedRectangle(cornerRadius: 12, style: .continuous)
+        )
+    }
+
+    private func metadataSection(_ clip: Clip) -> some View {
+        VStack(alignment: .leading, spacing: 10) {
+            HStack(spacing: 12) {
                 Label(clip.appName ?? "未知来源", systemImage: "app.dashed")
-                if clip.count > 1 {
-                    Text("×\(clip.count)")
-                        .padding(.horizontal, 5)
-                        .padding(.vertical, 1)
-                        .background(Capsule().fill(.quaternary))
-                }
-                Spacer()
+                Label("保存 \(clip.count) 次", systemImage: "square.stack.3d.up")
+                Spacer(minLength: 8)
                 Text(clip.lastSeenAt.formatted(date: .abbreviated, time: .shortened))
             }
             .font(.caption)
             .foregroundStyle(.secondary)
 
             if let urlString = clip.url, let url = URL(string: urlString) {
-                Text(urlString)
-                    .font(.caption2)
-                    .foregroundStyle(.secondary)
-                    .lineLimit(1)
-                    .truncationMode(.middle)
-                    .onTapGesture { NSWorkspace.shared.open(url) }
-            }
-
-            Divider()
-
-            Text("时间线 · \(clip.count) 次")
+                Button {
+                    NSWorkspace.shared.open(url)
+                } label: {
+                    Label {
+                        Text(urlString)
+                            .lineLimit(1)
+                            .truncationMode(.middle)
+                    } icon: {
+                        Image(systemName: "link")
+                    }
+                }
+                .buttonStyle(.plain)
                 .font(.caption)
                 .foregroundStyle(.secondary)
+                .help(urlString)
+            }
+        }
+    }
+
+    private var timelineSection: some View {
+        VStack(alignment: .leading, spacing: 0) {
+            HStack {
+                Label(
+                    "时间线",
+                    systemImage: "clock.arrow.trianglehead.counterclockwise.rotate.90"
+                )
+                .font(.subheadline.weight(.semibold))
+                Spacer()
+                Text("\(timelineEvents.count) 次记录")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+            }
+            .padding(.bottom, 12)
 
             if timelineEvents.isEmpty {
                 Text("暂无事件（早于时间线功能）")
-                    .font(.caption2)
+                    .font(.caption)
                     .foregroundStyle(.tertiary)
+                    .padding(.bottom, 4)
             } else {
-                ScrollView {
-                    VStack(alignment: .leading, spacing: 6) {
-                        ForEach(timelineEvents) { event in
-                            HStack(spacing: 6) {
-                                VStack(alignment: .leading, spacing: 1) {
-                                    Text(event.date.formatted(date: .abbreviated, time: .standard))
-                                    Text(event.appName ?? "未知来源")
-                                        .foregroundStyle(.secondary)
-                                }
-                                Spacer()
-                                if let urlString = event.url, let url = URL(string: urlString) {
-                                    Image(systemName: "link")
-                                        .onTapGesture { NSWorkspace.shared.open(url) }
-                                        .help(urlString)
-                                }
-                            }
-                            .font(.caption2)
+                ForEach(Array(timelineEvents.enumerated()), id: \.offset) { index, event in
+                    timelineRow(event, isLatest: index == 0, isLast: index == timelineEvents.count - 1)
+                }
+            }
+        }
+    }
+
+    private func timelineRow(
+        _ event: ClipEvent,
+        isLatest: Bool,
+        isLast: Bool
+    ) -> some View {
+        HStack(alignment: .top, spacing: 11) {
+            VStack(spacing: 0) {
+                Circle()
+                    .fill(isLatest ? Color.accentColor : Color.secondary.opacity(0.55))
+                    .frame(width: 7, height: 7)
+                if !isLast {
+                    Rectangle()
+                        .fill(.secondary.opacity(0.2))
+                        .frame(width: 1, height: 35)
+                }
+            }
+            .padding(.top, 5)
+
+            VStack(alignment: .leading, spacing: 2) {
+                Text(event.date.formatted(date: .abbreviated, time: .shortened))
+                    .font(.caption.weight(isLatest ? .semibold : .regular))
+                HStack(spacing: 5) {
+                    Text(event.appName ?? "未知来源")
+                    if let urlString = event.url, let url = URL(string: urlString) {
+                        Button {
+                            NSWorkspace.shared.open(url)
+                        } label: {
+                            Image(systemName: "link")
                         }
+                        .buttonStyle(.plain)
+                        .help(urlString)
                     }
-                    .frame(maxWidth: .infinity, alignment: .leading)
                 }
-                .frame(maxHeight: 140)
+                .font(.caption)
+                .foregroundStyle(.secondary)
             }
+            .padding(.bottom, isLast ? 0 : 9)
 
-            Divider()
-
-            HStack(spacing: 14) {
-                Button {
-                    editingClip = clip
-                } label: {
-                    Label("编辑", systemImage: "pencil")
-                }
-                Button {
-                    watcher.copyText(clip.text)
-                } label: {
-                    Label("复制", systemImage: "doc.on.doc")
-                }
-                Spacer()
-                Button {
-                    model.selectedClip = nil
-                } label: {
-                    Image(systemName: "xmark")
-                }
-                .buttonStyle(.borderless)
-                .help("关闭（ESC）")
-            }
-            .buttonStyle(.borderless)
-            .font(.system(size: 13))
+            Spacer(minLength: 0)
         }
-        .padding(16)
-        .frame(width: 300)
-        .background(
-            RoundedRectangle(cornerRadius: 14, style: .continuous)
-                .fill(.regularMaterial)
-                .shadow(color: .black.opacity(0.35), radius: 20, y: 6)
-        )
-        .overlay(
-            RoundedRectangle(cornerRadius: 14, style: .continuous)
-                .strokeBorder(.white.opacity(0.12), lineWidth: 1)
-        )
     }
 
-    // MARK: Canvas 绘制
-
-    private func draw(
-        in context: inout GraphicsContext,
-        size: CGSize,
-        now: Double
-    ) {
-        model.step(now: now)
-
-        // 极淡晕影：压暗四角保证白字可读，桌面保持透明
-        let rect = CGRect(origin: .zero, size: size)
-        context.fill(
-            Path(rect),
-            with: .radialGradient(
-                Gradient(colors: [.clear, .black.opacity(0.22)]),
-                center: CGPoint(x: rect.midX, y: rect.midY),
-                startRadius: min(rect.width, rect.height) * 0.35,
-                endRadius: max(rect.width, rect.height) * 0.72
-            )
-        )
-
-        let center = CGPoint(x: rect.midX, y: rect.midY)
-        let radius = min(rect.width, rect.height) * 0.36
-        let selectedId = model.selectedClip?.id
-
-        // 背面→前面排序绘制
-        var targets: [(item: GalaxyItem, center: CGPoint)] = []
-        let sorted = model.items
-            .map { ($0, model.rotatedPosition($0.position)) }
-            .sorted { $0.1.z < $1.1.z }
-
-        for (item, p) in sorted {
-            let depth = (p.z + 1) / 2 // 0=背面 1=正面
-            let alpha = 0.15 + 0.85 * depth
-            let scale = 0.72 + 0.28 * depth
-            // 正交投影：位置严格锁定球面轮廓
-            let point = CGPoint(x: center.x + p.x * radius, y: center.y - p.y * radius)
-            let isSelected = item.clipId == selectedId
-            let font = Font.system(
-                size: item.fontSize * scale * model.fontScale,
-                weight: isSelected ? .semibold : .regular
-            )
-
-            // 贴面：沿球面经线（东向切线）倾斜 + 边缘透视压缩
-            let qr = hypot(item.position.x, item.position.z) // 该点水平半径
-            let east: SIMD3<Double> = qr > 1e-6
-                ? SIMD3(item.position.z / qr, 0, -item.position.x / qr)
-                : SIMD3(1, 0, 0)
-            let t = model.rotatedPosition(east)
-            let angle = atan2(-t.y, t.x) // 屏幕坐标 y 翻转
-            let compression = max(0.28, hypot(t.x, t.y)) // 切线投影长度 = 压缩比
-
-            context.drawLayer { layer in
-                layer.translateBy(x: point.x, y: point.y)
-                layer.rotate(by: .radians(angle))
-                layer.scaleBy(x: compression, y: 1)
-                if isSelected {
-                    layer.addFilter(.shadow(color: .yellow.opacity(0.85), radius: 12))
-                    layer.draw(
-                        Text(item.label).font(font).foregroundStyle(.yellow),
-                        at: .zero
-                    )
-                } else {
-                    // 前半球才画投影，减负
-                    if depth > 0.5 {
-                        layer.draw(
-                            Text(item.label).font(font)
-                                .foregroundStyle(.black.opacity(alpha * 0.5)),
-                            at: CGPoint(x: 1, y: 1)
-                        )
-                    }
-                    layer.draw(
-                        Text(item.label).font(font).foregroundStyle(.white.opacity(alpha)),
-                        at: .zero
-                    )
-                }
+    private func detailActions(_ clip: Clip) -> some View {
+        HStack(spacing: 10) {
+            Button {
+                watcher.copyText(clip.text)
+            } label: {
+                Label("复制", systemImage: "doc.on.doc")
             }
+            .buttonStyle(.glassProminent)
 
-            if depth > 0.25 {
-                targets.append((item, point))
+            Button {
+                editingClip = clip
+            } label: {
+                Label("编辑", systemImage: "pencil")
+            }
+            .buttonStyle(.glass)
+
+            Spacer()
+
+            if let urlString = clip.url, let url = URL(string: urlString) {
+                Button {
+                    NSWorkspace.shared.open(url)
+                } label: {
+                    Image(systemName: "link")
+                }
+                .buttonStyle(.glass)
+                .help("打开来源网页")
             }
         }
-        model.hitTargets = targets
     }
+
 }
 
 // MARK: - 工具
