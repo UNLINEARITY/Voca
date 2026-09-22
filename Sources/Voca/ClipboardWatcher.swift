@@ -203,6 +203,8 @@ struct ClipboardHistoryView: View {
     @EnvironmentObject private var store: ClipStore
     @State private var promotedIDs: Set<UUID> = []
     @State private var expandedIDs: Set<UUID> = []
+    @State private var deletingEntry: ClipboardEntry?
+    @State private var confirmingClear = false
 
     var body: some View {
         NavigationStack {
@@ -227,12 +229,42 @@ struct ClipboardHistoryView: View {
             .toolbar {
                 ToolbarItem(placement: .primaryAction) {
                     Button(role: .destructive) {
-                        watcher.clear()
+                        confirmingClear = true
                     } label: {
                         Label("清空", systemImage: "trash")
                     }
                     .disabled(watcher.entries.isEmpty)
                 }
+            }
+            .confirmationDialog(
+                "移除这条记录？",
+                isPresented: .init(
+                    get: { deletingEntry != nil },
+                    set: { if !$0 { deletingEntry = nil } }
+                ),
+                titleVisibility: .visible
+            ) {
+                Button("移除", role: .destructive) {
+                    if let entry = deletingEntry { watcher.remove(entry) }
+                    deletingEntry = nil
+                }
+                Button("取消", role: .cancel) {
+                    deletingEntry = nil
+                }
+            } message: {
+                Text("仅从剪贴板历史移除，不影响已入库的记录")
+            }
+            .confirmationDialog(
+                "清空剪贴板历史？",
+                isPresented: $confirmingClear,
+                titleVisibility: .visible
+            ) {
+                Button("清空", role: .destructive) {
+                    watcher.clear()
+                }
+                Button("取消", role: .cancel) {}
+            } message: {
+                Text("将移除全部 \(watcher.entries.count) 条历史（不影响词库）")
             }
         }
     }
@@ -281,7 +313,7 @@ struct ClipboardHistoryView: View {
                     .help(promoted ? "已入库" : "加入词库")
                 }
                 Button {
-                    watcher.remove(entry)
+                    deletingEntry = entry
                 } label: {
                     Image(systemName: "xmark.circle")
                 }

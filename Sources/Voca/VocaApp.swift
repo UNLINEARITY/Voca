@@ -19,6 +19,7 @@
 import AppKit
 import KeyboardShortcuts
 import SwiftUI
+import UniformTypeIdentifiers
 
 extension KeyboardShortcuts.Name {
     static let saveSelection = Self("saveSelection")
@@ -188,6 +189,8 @@ struct RecordsView: View {
     @State private var search = ""
     @State private var editingClip: Clip?
     @State private var timelineClip: Clip?
+    @State private var deletingClip: Clip?
+    @State private var confirmingClearAll = false
 
     var body: some View {
         NavigationStack {
@@ -206,7 +209,8 @@ struct RecordsView: View {
                         ClipRow(
                             clip: clip,
                             onEdit: { editingClip = clip },
-                            onTimeline: { timelineClip = clip }
+                            onTimeline: { timelineClip = clip },
+                            onDelete: { deletingClip = clip }
                         )
                     }
                     .listStyle(.inset)
@@ -219,8 +223,16 @@ struct RecordsView: View {
             }
             .toolbar {
                 ToolbarItem(placement: .primaryAction) {
+                    Button {
+                        exportMarkdown()
+                    } label: {
+                        Label("导出 Markdown", systemImage: "square.and.arrow.down")
+                    }
+                    .disabled(store.clips.isEmpty)
+                }
+                ToolbarItem(placement: .primaryAction) {
                     Button(role: .destructive) {
-                        store.deleteAll()
+                        confirmingClearAll = true
                     } label: {
                         Label("清空全部", systemImage: "trash")
                     }
@@ -239,6 +251,51 @@ struct RecordsView: View {
             .sheet(item: $timelineClip) { clip in
                 ClipTimelineSheet(clip: clip)
             }
+            .confirmationDialog(
+                "删除这条记录？",
+                isPresented: .init(
+                    get: { deletingClip != nil },
+                    set: { if !$0 { deletingClip = nil } }
+                ),
+                titleVisibility: .visible
+            ) {
+                Button("删除（不可恢复）", role: .destructive) {
+                    if let clip = deletingClip { store.delete(clip) }
+                    deletingClip = nil
+                }
+                Button("取消", role: .cancel) {
+                    deletingClip = nil
+                }
+            } message: {
+                Text("将同时删除该记录的时间线事件")
+            }
+            .confirmationDialog(
+                "清空全部记录？",
+                isPresented: $confirmingClearAll,
+                titleVisibility: .visible
+            ) {
+                Button("清空全部（不可恢复）", role: .destructive) {
+                    store.deleteAll()
+                }
+                Button("取消", role: .cancel) {}
+            } message: {
+                Text("将永久删除全部 \(store.clips.count) 条记录及其时间线")
+            }
+        }
+    }
+
+    private func exportMarkdown() {
+        let panel = NSSavePanel()
+        panel.allowedContentTypes = [.plainText]
+        let formatter = DateFormatter()
+        formatter.dateFormat = "yyyyMMdd-HHmm"
+        panel.nameFieldStringValue = "Voca-导出-\(formatter.string(from: Date())).md"
+        guard panel.runModal() == .OK, let url = panel.url else { return }
+        do {
+            try store.exportMarkdown().write(to: url, atomically: true, encoding: .utf8)
+            ToastController.shared.show("已导出：\(url.lastPathComponent)")
+        } catch {
+            ToastController.shared.show("导出失败：\(error.localizedDescription)")
         }
     }
 }
@@ -247,6 +304,7 @@ struct ClipRow: View {
     let clip: Clip
     var onEdit: () -> Void
     var onTimeline: () -> Void
+    var onDelete: () -> Void
     @EnvironmentObject private var store: ClipStore
     @EnvironmentObject private var watcher: ClipboardWatcher
     @State private var expanded = false
@@ -298,7 +356,7 @@ struct ClipRow: View {
                 .buttonStyle(.borderless)
                 .help("编辑")
                 Button {
-                    store.delete(clip)
+                    onDelete()
                 } label: {
                     Image(systemName: "trash")
                 }
@@ -319,8 +377,8 @@ struct ClipRow: View {
             Button("编辑…") {
                 onEdit()
             }
-            Button("删除", role: .destructive) {
-                store.delete(clip)
+            Button("删除…", role: .destructive) {
+                onDelete()
             }
         }
     }

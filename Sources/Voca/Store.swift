@@ -214,6 +214,14 @@ final class ClipStore: ObservableObject {
         }) ?? []
     }
 
+    /// 导出全部词库为裸条目 Markdown：每条一行，条目间空一行（按最近保存倒序）
+    func exportMarkdown() -> String {
+        let all: [Clip] = (try? dbQueue.read { db in
+            try Clip.order(Column("lastSeenAt").desc).fetchAll(db)
+        }) ?? []
+        return all.map(\.text).joined(separator: "\n\n")
+    }
+
     func delete(_ clip: Clip) {
         try? dbQueue.write { db in
             if let clipId = clip.id {
