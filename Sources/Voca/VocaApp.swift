@@ -89,6 +89,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         KeyboardShortcuts.onKeyUp(for: .openGalaxy) {
             GalaxyWindowController.shared.toggle()
         }
+        // 调试/自动化入口：`open Voca.app --args --galaxy` 启动即打开星图
+        if CommandLine.arguments.contains("--galaxy") {
+            GalaxyWindowController.shared.open()
+        }
     }
 }
 

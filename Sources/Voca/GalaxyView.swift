@@ -210,7 +210,7 @@ private struct GalaxyView: View {
 
     var body: some View {
         GeometryReader { geometry in
-            let radius = min(geometry.size.width, geometry.size.height) * 0.36
+            let radius = min(geometry.size.width, geometry.size.height) * 0.30
 
             ZStack {
                 sphere(diameter: radius * 2)
@@ -253,28 +253,76 @@ private struct GalaxyView: View {
     }
 
     private func sphere(diameter: CGFloat) -> some View {
-        ZStack {
-            Circle()
-                .glassEffect(.clear, in: Circle())
-                .padding(diameter * 0.03)
-
+        // 球本体 = 磨砂核；外扩 1.4 倍直径为折射透镜环
+        let lensDiameter = diameter * 1.4
+        let radius = diameter / 2
+        return ZStack {
+            // 外环：Metal 折射透镜（捕获可用时呈现折射 + 色散）
             GalaxyLensView()
                 .clipShape(Circle())
-                .padding(diameter * 0.03)
+                .frame(width: lensDiameter, height: lensDiameter)
                 .allowsHitTesting(false)
 
-            if model.items.isEmpty {
-                ContentUnavailableView(
-                    "星图还是空的",
-                    systemImage: "sparkles",
-                    description: Text("保存一些文字后，它们会出现在这里。")
+            // 外环兜底：原生玻璃环，保证任何情况下都有透明折射感
+            Circle()
+                .fill(.clear)
+                .glassEffect(.clear, in: Circle())
+                .frame(width: lensDiameter, height: lensDiameter)
+
+            // 内核：原生磨砂材质（实时模糊背后桌面，零权限依赖）
+            Circle()
+                .fill(.ultraThinMaterial)
+                .frame(width: diameter, height: diameter)
+            // 暗色偏置：中心轻、边缘重，保文字清晰同时有球体厚度感
+            Circle()
+                .fill(
+                    RadialGradient(
+                        colors: [.black.opacity(0.10), .black.opacity(0.28)],
+                        center: UnitPoint(x: 0.5, y: 0.45),
+                        startRadius: 0,
+                        endRadius: radius
+                    )
                 )
-                .frame(maxWidth: diameter * 0.56)
-            } else {
-                GalaxySphereView(model: model)
+                .frame(width: diameter, height: diameter)
+            // 左上高光 + 边缘光：玻璃质感
+            Circle()
+                .fill(
+                    RadialGradient(
+                        colors: [.white.opacity(0.22), .clear],
+                        center: UnitPoint(x: 0.32, y: 0.28),
+                        startRadius: 0,
+                        endRadius: radius
+                    )
+                )
+                .frame(width: diameter, height: diameter)
+                .allowsHitTesting(false)
+            Circle()
+                .strokeBorder(
+                    LinearGradient(
+                        colors: [.white.opacity(0.5), .white.opacity(0.06)],
+                        startPoint: .topLeading,
+                        endPoint: .bottomTrailing
+                    ),
+                    lineWidth: 1.5
+                )
+                .frame(width: diameter, height: diameter)
+                .allowsHitTesting(false)
+
+            Group {
+                if model.items.isEmpty {
+                    ContentUnavailableView(
+                        "星图还是空的",
+                        systemImage: "sparkles",
+                        description: Text("保存一些文字后，它们会出现在这里。")
+                    )
+                    .frame(maxWidth: diameter * 0.56)
+                } else {
+                    GalaxySphereView(model: model)
+                }
             }
+            .frame(width: diameter, height: diameter)
         }
-        .frame(width: diameter, height: diameter)
+        .frame(width: lensDiameter, height: lensDiameter)
     }
 
     // MARK: 顶部与提示
