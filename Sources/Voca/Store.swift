@@ -30,6 +30,8 @@ struct Clip: Codable, Identifiable, Equatable, FetchableRecord, MutablePersistab
     var appBundleID: String?
     var wordCount: Int
     var createdAt: Date
+    /// 来源网页（浏览器保存时记录，可点击回源）
+    var url: String?
     /// 同文本出现次数（去重合并）
     var count: Int
     /// 最近一次保存时间（列表置顶排序键）
@@ -49,6 +51,7 @@ struct ClipEvent: Codable, Identifiable, Equatable, FetchableRecord, Persistable
     var date: Date
     var appName: String?
     var appBundleID: String?
+    var url: String?
 }
 
 final class ClipStore: ObservableObject {
@@ -117,6 +120,11 @@ final class ClipStore: ObservableObject {
                 columns: ["clipId"]
             )
         }
+        migrator.registerMigration("v4") { db in
+            try db.execute(sql: "ALTER TABLE clips ADD COLUMN url TEXT")
+            try db.execute(sql: "ALTER TABLE clip_events ADD COLUMN url TEXT")
+            try db.execute(sql: "ALTER TABLE clipboard_entries ADD COLUMN url TEXT")
+        }
         try migrator.migrate(dbQueue)
         reload()
     }
@@ -145,11 +153,13 @@ final class ClipStore: ObservableObject {
     // MARK: - 写入
 
     /// 保存（同文本合并去重）：已存在则计数 +1、更新 lastSeenAt 置顶并记录事件；否则新建
+    /// url 采用"最新非空值优先"：合并时仅在本次携带 URL 才覆盖
     @discardableResult
     func save(
         text: String,
         appName: String?,
         bundleID: String?,
+        url: String? = nil,
         date: Date = Date()
     ) throws -> Clip {
         let words = text.components(separatedBy: .whitespacesAndNewlines).filter { !$0.isEmpty }
@@ -158,6 +168,7 @@ final class ClipStore: ObservableObject {
             if var existing = try Clip.filter(Column("text") == text).fetchOne(db) {
                 existing.count += 1
                 existing.lastSeenAt = date
+                if let url { existing.url = url }
                 try existing.update(db)
                 if let clipId = existing.id {
                     let event = ClipEvent(
@@ -165,7 +176,8 @@ final class ClipStore: ObservableObject {
                         clipId: clipId,
                         date: date,
                         appName: appName,
-                        appBundleID: bundleID
+                        appBundleID: bundleID,
+                        url: url
                     )
                     try event.insert(db)
                 }
@@ -179,6 +191,7 @@ final class ClipStore: ObservableObject {
                     appBundleID: bundleID,
                     wordCount: words.count,
                     createdAt: date,
+                    url: url,
                     count: 1,
                     lastSeenAt: date
                 )
@@ -189,7 +202,8 @@ final class ClipStore: ObservableObject {
                         clipId: clipId,
                         date: date,
                         appName: appName,
-                        appBundleID: bundleID
+                        appBundleID: bundleID,
+                        url: url
                     )
                     try event.insert(db)
                 }
@@ -273,7 +287,7 @@ final class ClipStore: ObservableObject {
         let rows = (try? dbQueue.read { db in
             try Row.fetchAll(
                 db,
-                sql: "SELECT id, text, appName, appBundleID, date FROM clipboard_entries ORDER BY date DESC LIMIT 200"
+                sql: "SELECT id, text, appName, appBundleID, url, date FROM clipboard_entries ORDER BY date DESC LIMIT 200"
             )
         }) ?? []
         return rows.compactMap { row in
@@ -284,6 +298,7 @@ final class ClipStore: ObservableObject {
             }
             let appName: String? = row["appName"]
             let appBundleID: String? = row["appBundleID"]
+            let url: String? = row["url"]
             let date: Date? = row["date"]
             return ClipboardEntry(
                 id: id,
@@ -292,6 +307,7 @@ final class ClipStore: ObservableObject {
                 fileNames: nil,
                 appName: appName,
                 appBundleID: appBundleID,
+                url: url,
                 date: date ?? Date()
             )
         }
@@ -302,8 +318,8 @@ final class ClipStore: ObservableObject {
         guard let text = entry.text else { return }
         try? dbQueue.write { db in
             try db.execute(
-                sql: "INSERT INTO clipboard_entries (id, text, appName, appBundleID, date) VALUES (?, ?, ?, ?, ?)",
-                arguments: [entry.id.uuidString, text, entry.appName, entry.appBundleID, entry.date]
+                sql: "INSERT INTO clipboard_entries (id, text, appName, appBundleID, url, date) VALUES (?, ?, ?, ?, ?, ?)",
+                arguments: [entry.id.uuidString, text, entry.appName, entry.appBundleID, entry.url, entry.date]
             )
             try db.execute(
                 sql: "DELETE FROM clipboard_entries WHERE id NOT IN (SELECT id FROM clipboard_entries ORDER BY date DESC LIMIT 200)"

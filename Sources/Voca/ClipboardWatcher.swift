@@ -27,6 +27,7 @@ struct ClipboardEntry: Identifiable, Equatable {
     let fileNames: [String]?
     let appName: String?
     let appBundleID: String?
+    var url: String?
     let date: Date
 
     var isText: Bool { text != nil }
@@ -95,7 +96,7 @@ final class ClipboardWatcher: ObservableObject {
 
         let app = NSWorkspace.shared.frontmostApplication
 
-        // 1) 文本：直接记录 + 持久化（不去重）
+        // 1) 文本：直接记录 + 持久化（不去重）；来自浏览器时顺带记录当前标签页 URL
         if let text = pasteboard.string(forType: .string)?
             .trimmingCharacters(in: .whitespacesAndNewlines), !text.isEmpty
         {
@@ -106,6 +107,7 @@ final class ClipboardWatcher: ObservableObject {
                 fileNames: nil,
                 appName: app?.localizedName,
                 appBundleID: app?.bundleIdentifier,
+                url: BrowserTabURL.current(bundleID: app?.bundleIdentifier),
                 date: Date()
             )
             entries.insert(entry, at: 0)
@@ -127,6 +129,7 @@ final class ClipboardWatcher: ObservableObject {
                     fileNames: urls.map(\.lastPathComponent),
                     appName: app?.localizedName,
                     appBundleID: app?.bundleIdentifier,
+                    url: nil,
                     date: Date()
                 )
             )
@@ -143,6 +146,7 @@ final class ClipboardWatcher: ObservableObject {
                     fileNames: nil,
                     appName: app?.localizedName,
                     appBundleID: app?.bundleIdentifier,
+                    url: nil,
                     date: Date()
                 )
             )
@@ -322,6 +326,18 @@ struct ClipboardHistoryView: View {
             }
             .font(.caption)
             .foregroundStyle(.secondary)
+
+            // 来源网页：浅灰小字显示在来源行下方，点击打开
+            if let urlString = entry.url, let url = URL(string: urlString) {
+                Text(urlString)
+                    .font(.caption2)
+                    .foregroundStyle(.secondary)
+                    .lineLimit(1)
+                    .truncationMode(.middle)
+                    .onTapGesture {
+                        NSWorkspace.shared.open(url)
+                    }
+            }
         }
         .padding(.vertical, 4)
     }
@@ -359,6 +375,7 @@ struct ClipboardHistoryView: View {
                 text: text,
                 appName: entry.appName,
                 bundleID: entry.appBundleID,
+                url: entry.url,
                 date: entry.date
             )
             ToastController.shared.show(clip.count > 1 ? "已入库（第 \(clip.count) 次）" : "已加入词库")

@@ -21,10 +21,51 @@ import ApplicationServices
 import Carbon.HIToolbox
 
 enum CaptureResult {
-    case success(text: String, appName: String?, bundleID: String?)
+    case success(text: String, appName: String?, bundleID: String?, url: String?)
     case emptySelection
     case notTrusted
     case secureField
+}
+
+/// 前台浏览器当前标签页 URL（Apple Events 查询；须在主线程调用）
+enum BrowserTabURL {
+    /// bundleID → AppleScript 目标名（Chromium 系共用同一套字典；Firefox 无接口不收录）
+    private static let targets: [String: String] = [
+        "com.apple.Safari": "Safari",
+        "com.google.Chrome": "Google Chrome",
+        "com.microsoft.edgemac": "Microsoft Edge",
+        "com.brave.Browser": "Brave Browser",
+        "company.thebrowser.Browser": "Arc",
+        "com.vivaldi.Vivaldi": "Vivaldi",
+        "com.operasoftware.Opera": "Opera",
+    ]
+
+    static func isSupportedBrowser(bundleID: String?) -> Bool {
+        guard let bundleID else { return false }
+        return targets[bundleID] != nil
+    }
+
+    /// 返回当前标签页 URL；非受支持浏览器、无窗口、未授权或非 http(s) 链接时返回 nil
+    static func current(bundleID: String?) -> String? {
+        guard let bundleID, let name = targets[bundleID] else { return nil }
+        let isChromium = name != "Safari"
+        let source = """
+        tell application "\(name)"
+            if (count of windows) > 0 then
+                return URL of \(isChromium ? "active tab of front window" : "front document")
+            end if
+        end tell
+        """
+        guard let script = NSAppleScript(source: source) else { return nil }
+        var errorInfo: NSDictionary?
+        let output = script.executeAndReturnError(&errorInfo)
+        if let errorInfo {
+            NSLog("Voca: AppleScript 查询 %@ 失败：%@", name, errorInfo)
+            return nil
+        }
+        guard let value = output.stringValue, value.hasPrefix("http") else { return nil }
+        return value
+    }
 }
 
 /// 取词引擎：AX API 优先，失败降级为模拟 ⌘C（读完恢复原剪贴板）
@@ -54,15 +95,19 @@ final class CaptureEngine {
         let frontApp = NSWorkspace.shared.frontmostApplication
         let appName = frontApp?.localizedName
         let bundleID = frontApp?.bundleIdentifier
+        // 前台是受支持浏览器时查询当前标签页 URL（NSAppleScript 须在主线程执行）
+        let url = DispatchQueue.main.sync {
+            BrowserTabURL.current(bundleID: bundleID)
+        }
 
         if focusedElementIsSecure() { return .secureField }
 
         if let text = axSelectedText()?.trimmingCharacters(in: .whitespacesAndNewlines), !text.isEmpty {
-            return .success(text: text, appName: appName, bundleID: bundleID)
+            return .success(text: text, appName: appName, bundleID: bundleID, url: url)
         }
 
         if let text = copyFallback()?.trimmingCharacters(in: .whitespacesAndNewlines), !text.isEmpty {
-            return .success(text: text, appName: appName, bundleID: bundleID)
+            return .success(text: text, appName: appName, bundleID: bundleID, url: url)
         }
 
         return .emptySelection

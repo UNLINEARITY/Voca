@@ -51,10 +51,15 @@ final class AppModel: ObservableObject {
 
     private func handle(_ result: CaptureResult) {
         switch result {
-        case .success(let text, let appName, let bundleID):
+        case .success(let text, let appName, let bundleID, let url):
             let capped = String(text.prefix(10_000))
             do {
-                let clip = try store.save(text: capped, appName: appName, bundleID: bundleID)
+                let clip = try store.save(
+                    text: capped,
+                    appName: appName,
+                    bundleID: bundleID,
+                    url: url
+                )
                 let suffix = appName.map { " · 来自 \($0)" } ?? ""
                 if clip.count > 1 {
                     ToastController.shared.show("第 \(clip.count) 次记录，已置顶\(suffix)")
@@ -373,9 +378,26 @@ struct ClipRow: View {
             }
             .font(.caption)
             .foregroundStyle(.secondary)
+
+            // 来源网页：浅灰小字显示在来源行下方，点击打开
+            if let urlString = clip.url, let url = URL(string: urlString) {
+                Text(urlString)
+                    .font(.caption2)
+                    .foregroundStyle(.secondary)
+                    .lineLimit(1)
+                    .truncationMode(.middle)
+                    .onTapGesture {
+                        NSWorkspace.shared.open(url)
+                    }
+            }
         }
         .padding(.vertical, 4)
         .contextMenu {
+            if let urlString = clip.url, let url = URL(string: urlString) {
+                Button("打开来源网页") {
+                    NSWorkspace.shared.open(url)
+                }
+            }
             Button("复制全文") {
                 watcher.copyText(clip.text)
             }
@@ -489,6 +511,15 @@ struct ClipTimelineSheet: View {
                                 .foregroundStyle(.secondary)
                         }
                         Spacer()
+                        if let urlString = event.url, let url = URL(string: urlString) {
+                            Button {
+                                NSWorkspace.shared.open(url)
+                            } label: {
+                                Image(systemName: "link")
+                            }
+                            .buttonStyle(.borderless)
+                            .help("打开来源网页：\(urlString)")
+                        }
                         Image(systemName: "app.dashed")
                             .foregroundStyle(.quaternary)
                     }

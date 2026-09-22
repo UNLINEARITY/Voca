@@ -56,6 +56,8 @@ cat > "$APP/Contents/Info.plist" <<'EOF'
     <string>14.0</string>
     <key>LSUIElement</key>
     <true/>
+    <key>NSAppleEventsUsageDescription</key>
+    <string>Voca 在保存来自浏览器的选中文字时，读取当前标签页网址作为来源记录。</string>
     <key>NSHumanReadableCopyright</key>
     <string>Personal use</string>
 </dict>
