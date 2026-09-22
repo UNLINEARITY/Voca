@@ -31,6 +31,14 @@ enum CaptureResult {
 final class CaptureEngine {
     static let shared = CaptureEngine()
 
+    /// ⌘C 降级进行中：剪贴板监听应暂停，避免记录我们模拟的复制与恢复动作
+    static var isSimulatingCopy: Bool {
+        get { simLock.lock(); defer { simLock.unlock() }; return _isSimulatingCopy }
+        set { simLock.lock(); defer { simLock.unlock() }; _isSimulatingCopy = newValue }
+    }
+    private static let simLock = NSLock()
+    private static var _isSimulatingCopy = false
+
     var isTrusted: Bool { AXIsProcessTrusted() }
 
     /// 弹出系统授权引导

@@ -28,6 +28,7 @@ extension KeyboardShortcuts.Name {
 final class AppModel: ObservableObject {
     static let shared = AppModel()
     let store: ClipStore
+    let clipboardWatcher: ClipboardWatcher
 
     private init() {
         do {
@@ -35,6 +36,7 @@ final class AppModel: ObservableObject {
         } catch {
             fatalError("Voca: 无法打开数据库：\(error)")
         }
+        clipboardWatcher = ClipboardWatcher(store: store)
     }
 
     func handleHotkey() {
@@ -100,6 +102,7 @@ struct VocaApp: App {
         MenuBarExtra {
             MenuBarView()
                 .environmentObject(model.store)
+                .environmentObject(model.clipboardWatcher)
         } label: {
             Image(systemName: "text.quote")
         }
@@ -110,6 +113,13 @@ struct VocaApp: App {
                 .environmentObject(model.store)
         }
         .defaultSize(width: 560, height: 480)
+
+        Window("剪贴板历史", id: "clipboard") {
+            ClipboardHistoryView()
+                .environmentObject(model.clipboardWatcher)
+                .environmentObject(model.store)
+        }
+        .defaultSize(width: 520, height: 460)
     }
 }
 
@@ -117,6 +127,7 @@ struct VocaApp: App {
 
 struct MenuBarView: View {
     @EnvironmentObject private var store: ClipStore
+    @EnvironmentObject private var watcher: ClipboardWatcher
     @Environment(\.openWindow) private var openWindow
 
     var body: some View {
@@ -135,6 +146,10 @@ struct MenuBarView: View {
 
             KeyboardShortcuts.Recorder("保存快捷键：", name: .saveSelection)
 
+            Toggle(isOn: $watcher.isEnabled) {
+                Label("记录剪贴板历史", systemImage: "doc.on.clipboard")
+            }
+
             Divider()
 
             Button {
@@ -142,6 +157,14 @@ struct MenuBarView: View {
                 NSApp.activate(ignoringOtherApps: true)
             } label: {
                 Label("查看全部记录", systemImage: "list.bullet.rectangle")
+                    .frame(maxWidth: .infinity, alignment: .leading)
+            }
+
+            Button {
+                openWindow(id: "clipboard")
+                NSApp.activate(ignoringOtherApps: true)
+            } label: {
+                Label("剪贴板历史", systemImage: "clipboard")
                     .frame(maxWidth: .infinity, alignment: .leading)
             }
 

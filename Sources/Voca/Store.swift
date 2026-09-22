@@ -69,6 +69,20 @@ final class ClipStore: ObservableObject {
                 columns: ["createdAt"]
             )
         }
+        migrator.registerMigration("v2") { db in
+            try db.create(table: "clipboard_entries") { t in
+                t.column("id", .text).primaryKey()
+                t.column("text", .text).notNull()
+                t.column("appName", .text)
+                t.column("appBundleID", .text)
+                t.column("date", .datetime).notNull()
+            }
+            try db.create(
+                index: "idx_clipboard_date",
+                on: "clipboard_entries",
+                columns: ["date"]
+            )
+        }
         try migrator.migrate(dbQueue)
         reload()
     }
@@ -112,7 +126,12 @@ final class ClipStore: ObservableObject {
     // MARK: - 写入
 
     @discardableResult
-    func insert(text: String, appName: String?, bundleID: String?) throws -> Clip {
+    func insert(
+        text: String,
+        appName: String?,
+        bundleID: String?,
+        date: Date = Date()
+    ) throws -> Clip {
         let words = text.components(separatedBy: .whitespacesAndNewlines).filter { !$0.isEmpty }
         var clip = Clip(
             id: nil,
@@ -121,7 +140,7 @@ final class ClipStore: ObservableObject {
             appName: appName,
             appBundleID: bundleID,
             wordCount: words.count,
-            createdAt: Date()
+            createdAt: date
         )
         try dbQueue.write { db in
             try clip.insert(db)
@@ -142,6 +161,65 @@ final class ClipStore: ObservableObject {
             _ = try Clip.deleteAll(db)
         }
         reload()
+    }
+
+    // MARK: - 剪贴板历史持久化（仅文本条目）
+
+    func loadClipboardEntries() -> [ClipboardEntry] {
+        let rows = (try? dbQueue.read { db in
+            try Row.fetchAll(
+                db,
+                sql: "SELECT id, text, appName, appBundleID, date FROM clipboard_entries ORDER BY date DESC LIMIT 200"
+            )
+        }) ?? []
+        return rows.compactMap { row in
+            let idString: String? = row["id"]
+            let text: String? = row["text"]
+            guard let id = idString.flatMap(UUID.init(uuidString:)), let text else {
+                return nil
+            }
+            let appName: String? = row["appName"]
+            let appBundleID: String? = row["appBundleID"]
+            let date: Date? = row["date"]
+            return ClipboardEntry(
+                id: id,
+                text: text,
+                image: nil,
+                fileNames: nil,
+                appName: appName,
+                appBundleID: appBundleID,
+                date: date ?? Date()
+            )
+        }
+    }
+
+    /// 直接插入新条目（不去重），并维持最多 200 条
+    func saveClipboardEntry(_ entry: ClipboardEntry) {
+        guard let text = entry.text else { return }
+        try? dbQueue.write { db in
+            try db.execute(
+                sql: "INSERT INTO clipboard_entries (id, text, appName, appBundleID, date) VALUES (?, ?, ?, ?, ?)",
+                arguments: [entry.id.uuidString, text, entry.appName, entry.appBundleID, entry.date]
+            )
+            try db.execute(
+                sql: "DELETE FROM clipboard_entries WHERE id NOT IN (SELECT id FROM clipboard_entries ORDER BY date DESC LIMIT 200)"
+            )
+        }
+    }
+
+    func deleteClipboardEntry(id: UUID) {
+        try? dbQueue.write { db in
+            try db.execute(
+                sql: "DELETE FROM clipboard_entries WHERE id = ?",
+                arguments: [id.uuidString]
+            )
+        }
+    }
+
+    func clearClipboardEntries() {
+        try? dbQueue.write { db in
+            try db.execute(sql: "DELETE FROM clipboard_entries")
+        }
     }
 
     // MARK: - Private
