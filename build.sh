@@ -1,4 +1,6 @@
 #!/bin/bash
+# Voca build script — Copyright (C) 2026 UNLINEARITY <https://github.com/UNLINEARITY>
+# SPDX-License-Identifier: AGPL-3.0-or-later
 # Voca 一键构建：编译 release 版本并组装 Voca.app
 # 用法：./build.sh   （产物在 build/Voca.app）
 set -euo pipefail

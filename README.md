@@ -64,6 +64,12 @@ open build/Voca.app # 启动（菜单栏会出现 ❝ 图标）
 - 无导出按钮——数据本身就是标准 SQLite 文件
 - 无开机自启设置——用系统「登录项」管理
 
+## 许可
+
+本项目以 [AGPL-3.0-or-later](LICENSE) 发布，© 2026 [UNLINEARITY](https://github.com/UNLINEARITY)。
+
+依赖 [GRDB](https://github.com/groue/GRDB.swift) 与 [KeyboardShortcuts](https://github.com/sindresorhus/KeyboardShortcuts) 均为 MIT 许可，与 AGPL 兼容。
+
 ## 开发
 
 ```bash
