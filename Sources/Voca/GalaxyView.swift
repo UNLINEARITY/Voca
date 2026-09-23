@@ -20,6 +20,11 @@ import AppKit
 import SwiftUI
 import simd
 
+enum GalaxyDistribution: String, CaseIterable {
+    case fibonacci
+    case latitude
+}
+
 /// 星图实时调参（滑块面板驱动，UserDefaults 持久化）
 final class GalaxyTuning: ObservableObject {
     static let shared = GalaxyTuning()
@@ -37,6 +42,9 @@ final class GalaxyTuning: ObservableObject {
     @Published var reverseRotation: Bool {
         didSet { UserDefaults.standard.set(reverseRotation, forKey: "gt.reverseRotation") }
     }
+    @Published var distribution: GalaxyDistribution {
+        didSet { UserDefaults.standard.set(distribution.rawValue, forKey: "gt.distribution") }
+    }
 
     init() {
         let defaults = UserDefaults.standard
@@ -51,6 +59,8 @@ final class GalaxyTuning: ObservableObject {
         coreDarkCenter = defaults.object(forKey: "gt.coreDarkCenter") as? Double ?? 0.10
         coreDarkEdge = defaults.object(forKey: "gt.coreDarkEdge") as? Double ?? 0.28
         reverseRotation = defaults.bool(forKey: "gt.reverseRotation")
+        distribution = GalaxyDistribution(rawValue: defaults.string(forKey: "gt.distribution") ?? "")
+            ?? .fibonacci
     }
 
     private func save(_ name: String, _ value: Double) {
@@ -62,6 +72,7 @@ final class GalaxyTuning: ObservableObject {
         rimStrength = 0.30; fresnelTint = 0.16; sphereScale = 0.40; ringScale = 1.25
         coreDarkCenter = 0.10; coreDarkEdge = 0.28
         reverseRotation = false
+        distribution = .fibonacci
     }
 }
 
@@ -99,11 +110,42 @@ enum GalaxyEntry {
 }
 
 struct GalaxyItem {
+    static let maximumTextAngle: Float = 1.18
+    static let fontAngleScale: CGFloat = 0.00325
+
     let clipId: Int64
     let text: String
     let fontSize: CGFloat
     let entry: GalaxyEntry
     let position: SIMD3<Float>
+
+    var angularHeight: Float {
+        Float(min(max(fontSize * Self.fontAngleScale, 0.018), 0.20))
+    }
+
+    var sphereText: String {
+        let font = NSFont.systemFont(ofSize: fontSize, weight: .medium)
+        let lineHeight = font.ascender - font.descender + font.leading
+        let maximumWidth = CGFloat(Self.maximumTextAngle / angularHeight) * lineHeight
+        let attributes: [NSAttributedString.Key: Any] = [.font: font]
+        if (text as NSString).size(withAttributes: attributes).width <= maximumWidth {
+            return text
+        }
+
+        let ellipsisWidth = ("…" as NSString).size(withAttributes: attributes).width
+        var result = ""
+        var width: CGFloat = 0
+        for character in text {
+            let value = String(character)
+            let characterWidth = (value as NSString).size(withAttributes: attributes).width
+            guard width + characterWidth + ellipsisWidth <= maximumWidth else { break }
+            result.append(character)
+            width += characterWidth
+        }
+        return result + "…"
+    }
+
+    var isTruncated: Bool { sphereText != text }
 }
 
 @MainActor
@@ -163,13 +205,15 @@ final class GalaxyModel: ObservableObject {
         timelinePage = 0
     }
 
+    func relayout() {
+        let selectedID = selectedItem?.clipId
+        makeItems(from: items.map(\.entry))
+        selectedItem = items.first { $0.clipId == selectedID }
+    }
+
     private func makeItems(from entries: [GalaxyEntry]) {
-        let count = entries.count
-        let goldenAngle = Float.pi * (3.0 - sqrt(5.0))
+        let positions = Self.positions(count: entries.count, distribution: GalaxyTuning.shared.distribution)
         items = entries.enumerated().map { index, entry in
-            let y = 1.0 - 2.0 * (Float(index) + 0.5) / Float(count)
-            let horizontalRadius = sqrt(max(0, 1 - y * y))
-            let theta = goldenAngle * Float(index)
             let id: Int64
             switch entry {
             case .library(let clip): id = clip.id ?? 0
@@ -180,13 +224,76 @@ final class GalaxyModel: ObservableObject {
                 text: Self.displayText(entry.text),
                 fontSize: 25,
                 entry: entry,
-                position: SIMD3(
-                    horizontalRadius * cos(theta),
-                    y,
-                    horizontalRadius * sin(theta)
-                )
+                position: positions[index]
             )
         }
+    }
+
+    private static func positions(count: Int, distribution: GalaxyDistribution) -> [SIMD3<Float>] {
+        guard count > 0 else { return [] }
+        switch distribution {
+        case .fibonacci:
+            let goldenAngle = Float.pi * (3.0 - sqrt(5.0))
+            return (0..<count).map { index in
+                let y = 1.0 - 2.0 * (Float(index) + 0.5) / Float(count)
+                let radius = sqrt(max(0, 1 - y * y))
+                let theta = goldenAngle * Float(index)
+                return SIMD3(radius * cos(theta), y, radius * sin(theta))
+            }
+        case .latitude:
+            return latitudePositions(count: count)
+        }
+    }
+
+    private static func latitudePositions(count: Int) -> [SIMD3<Float>] {
+        let bands = min(count, max(1, Int((Double(count) * .pi).squareRoot().rounded())))
+        let verticalExtent = 0.85
+        let weights = (0..<bands).map { band in
+            let latitude = Double.pi * (Double(band) + 0.5) / Double(bands)
+            let y = verticalExtent * cos(latitude)
+            return sqrt(max(0, 1 - y * y))
+        }
+        let totalWeight = weights.reduce(0, +)
+        let target = weights.map { Double(count) * $0 / totalWeight }
+        var slots = [Int](repeating: 1, count: bands)
+        let middle = bands / 2
+        if !bands.isMultiple(of: 2), count.isMultiple(of: 2) {
+            slots[middle] = 2
+        }
+        var remaining = count - slots.reduce(0, +)
+        while remaining >= 2 {
+            var bestBand = 0
+            var largestDeficit = -Double.infinity
+            for band in 0..<((bands + 1) / 2) {
+                let deficit = target[band] - Double(slots[band])
+                if deficit > largestDeficit {
+                    largestDeficit = deficit
+                    bestBand = band
+                }
+            }
+            if bestBand == middle {
+                slots[middle] += 2
+            } else {
+                slots[bestBand] += 1
+                slots[bands - bestBand - 1] += 1
+            }
+            remaining -= 2
+        }
+        if remaining == 1 { slots[middle - 1] += 1 }
+
+        var result: [SIMD3<Float>] = []
+        result.reserveCapacity(count)
+        for band in 0..<bands {
+            let latitude = Float.pi * (Float(band) + 0.5) / Float(bands)
+            let y = Float(verticalExtent) * cos(latitude)
+            let radius = sqrt(max(0, 1 - y * y))
+            let phase: Float = band.isMultiple(of: 2) || slots[band] == 1 ? 0 : 0.5
+            for slot in 0..<slots[band] {
+                let theta = Float.pi / 2 + 2 * Float.pi * (Float(slot) + phase) / Float(slots[band])
+                result.append(SIMD3(radius * cos(theta), y, radius * sin(theta)))
+            }
+        }
+        return result
     }
 
     func turnTimelinePage(with event: NSEvent) {
@@ -387,6 +494,9 @@ private struct GalaxyView: View {
             .animation(selectionAnimation, value: model.timelinePage)
         }
         .background(.clear)
+        .onChange(of: tuning.distribution) { _, _ in
+            model.relayout()
+        }
         .onChange(of: model.source) { _, source in
             model.selectedItem = nil
             if source == .library {
@@ -562,10 +672,20 @@ private struct GalaxyView: View {
         if let item = model.selectedItem {
             switch item.entry {
             case .library(let clip):
-                if !model.isTimelineVisible,
-                   let note = clip.note,
-                   !note.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
-                    noteBelowSphere(note, availableWidth: availableWidth)
+                if !model.isTimelineVisible {
+                    let note = clip.note.flatMap { value -> String? in
+                        value.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty ? nil : value
+                    }
+                    if item.isTruncated {
+                        let detail = note.map { clip.text + "\n\n" + $0 } ?? clip.text
+                        noteBelowSphere(
+                            detail,
+                            availableWidth: availableWidth,
+                            label: note == nil ? "原文" : "原文与备注"
+                        )
+                    } else if let note {
+                        noteBelowSphere(note, availableWidth: availableWidth)
+                    }
                 }
             case .clipboard(let entry):
                 if let text = entry.text {
@@ -638,6 +758,16 @@ private struct GalaxyView: View {
                         Image(systemName: "xmark")
                     }
                     .buttonStyle(.glass)
+                }
+
+                VStack(alignment: .leading, spacing: 6) {
+                    Text("文字排布").font(.caption)
+                    Picker("文字排布", selection: $tuning.distribution) {
+                        Text("均匀散点").tag(GalaxyDistribution.fibonacci)
+                        Text("纬线").tag(GalaxyDistribution.latitude)
+                    }
+                    .pickerStyle(.segmented)
+                    .labelsHidden()
                 }
 
                 Picker("旋转方向", selection: $tuning.reverseRotation) {

@@ -145,13 +145,12 @@ final class GalaxySceneView: SCNView {
 @MainActor
 final class GalaxySceneCoordinator: NSObject {
     private static let sphereRadius: CGFloat = 1.48
-    private static let maximumTextAngle: Float = 1.18
-    private static let fontAngleScale: CGFloat = 0.00325
     private static let baseAutoRotate: Float = 0.06
     private static let selectedLift: Float = 0.09
 
     private struct RenderedLabel {
         let item: GalaxyItem
+        let geometryCenter: SIMD3<Float>
         let node: SCNNode
     }
 
@@ -164,6 +163,7 @@ final class GalaxySceneCoordinator: NSObject {
     private var timer: Timer?
     private var latestItems: [GalaxyItem] = []
     private var renderedSignature: Int?
+    private var appliedFontScale: Double?
     private var selectedID: Int64?
     private var reverseRotation = false
 
@@ -230,12 +230,21 @@ final class GalaxySceneCoordinator: NSObject {
             pitchVelocity = 0
         }
         let signature = itemSignature(items)
-
+        var didRebuild = false
         if renderedSignature != signature {
-            rebuild(items: items, signature: signature)
+            if canRelayout(items) {
+                animateLayout(items: items, signature: signature)
+            } else {
+                rebuild(items: items, signature: signature)
+                didRebuild = true
+            }
         }
+        let selectionChanged = self.selectedID != selectedID
         updateSelection(selectedID)
-        applyTextScale(fontScale)
+        if didRebuild || selectionChanged || appliedFontScale != fontScale {
+            applyTextScale(fontScale)
+            appliedFontScale = fontScale
+        }
     }
 
     func beginDrag(at point: CGPoint, time: TimeInterval) {
@@ -358,11 +367,53 @@ final class GalaxySceneCoordinator: NSObject {
             node.simdPosition = item.clipId == selectedID
                 ? simd_normalize(item.position) * Self.selectedLift : .zero
             labelsRoot.addChildNode(node)
-            labels[item.clipId] = RenderedLabel(item: item, node: node)
+            labels[item.clipId] = RenderedLabel(
+                item: item,
+                geometryCenter: item.position,
+                node: node
+            )
         }
         SCNTransaction.commit()
 
         renderedSignature = signature
+    }
+
+    private func canRelayout(_ items: [GalaxyItem]) -> Bool {
+        let drawable = items.filter { !$0.text.isEmpty }
+        guard drawable.count == labels.count else { return false }
+        return drawable.allSatisfy { item in
+            guard let old = labels[item.clipId] else { return false }
+            return old.item.text == item.text && old.item.fontSize == item.fontSize
+        }
+    }
+
+    private func animateLayout(items: [GalaxyItem], signature: Int) {
+        SCNTransaction.begin()
+        SCNTransaction.animationDuration = 0.38
+        SCNTransaction.animationTimingFunction = CAMediaTimingFunction(name: .easeInEaseOut)
+        for item in items where !item.text.isEmpty {
+            guard let old = labels[item.clipId] else { continue }
+            old.node.simdOrientation = orientation(from: old.geometryCenter, to: item.position)
+            old.node.simdPosition = item.clipId == selectedID
+                ? simd_normalize(item.position) * Self.selectedLift : .zero
+            labels[item.clipId] = RenderedLabel(
+                item: item,
+                geometryCenter: old.geometryCenter,
+                node: old.node
+            )
+        }
+        SCNTransaction.commit()
+        renderedSignature = signature
+    }
+
+    private func orientation(from original: SIMD3<Float>, to target: SIMD3<Float>) -> simd_quatf {
+        func basis(_ position: SIMD3<Float>) -> simd_float3x3 {
+            let center = simd_normalize(position)
+            let east = simd_normalize(SIMD3(center.z, 0, -center.x))
+            let north = simd_normalize(simd_cross(center, east))
+            return simd_float3x3(columns: (east, north, center))
+        }
+        return simd_quatf(basis(target) * simd_transpose(basis(original)))
     }
 
     private func applyTextScale(_ scale: Double) {
@@ -398,42 +449,17 @@ final class GalaxySceneCoordinator: NSObject {
     private func makeLayout(
         for item: GalaxyItem
     ) -> (text: String, renderFontSize: CGFloat, angularWidth: Float, angularHeight: Float) {
-        let logicalFont = NSFont.systemFont(ofSize: item.fontSize, weight: .medium)
-        let lineHeight = logicalFont.ascender - logicalFont.descender + logicalFont.leading
-        let angularHeight = Float(
-            min(max(item.fontSize * Self.fontAngleScale, 0.018), 0.20)
-        )
-        let maximumTextWidth = CGFloat(Self.maximumTextAngle / angularHeight) * lineHeight
-        let text = truncated(item.text, font: logicalFont, maximumWidth: maximumTextWidth)
+        let text = item.sphereText
+        let angularHeight = item.angularHeight
         let renderFontSize = max(42, item.fontSize * 3)
         let image = textImage(text, fontSize: renderFontSize)
         let aspectRatio = Float(image.size.width / max(1, image.size.height))
         return (
             text,
             renderFontSize,
-            min(Self.maximumTextAngle, aspectRatio * angularHeight),
+            min(GalaxyItem.maximumTextAngle, aspectRatio * angularHeight),
             angularHeight
         )
-    }
-
-    private func truncated(_ text: String, font: NSFont, maximumWidth: CGFloat) -> String {
-        let attributes: [NSAttributedString.Key: Any] = [.font: font]
-        if (text as NSString).size(withAttributes: attributes).width <= maximumWidth {
-            return text
-        }
-
-        let ellipsis = "…"
-        let ellipsisWidth = (ellipsis as NSString).size(withAttributes: attributes).width
-        var result = ""
-        var width: CGFloat = 0
-        for character in text {
-            let value = String(character)
-            let characterWidth = (value as NSString).size(withAttributes: attributes).width
-            guard width + characterWidth + ellipsisWidth <= maximumWidth else { break }
-            result.append(character)
-            width += characterWidth
-        }
-        return result + ellipsis
     }
 
     private func makeTextNode(
@@ -613,6 +639,9 @@ final class GalaxySceneCoordinator: NSObject {
             hasher.combine(item.clipId)
             hasher.combine(item.text)
             hasher.combine(item.fontSize)
+            hasher.combine(item.position.x)
+            hasher.combine(item.position.y)
+            hasher.combine(item.position.z)
         }
         return hasher.finalize()
     }
