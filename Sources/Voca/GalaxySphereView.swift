@@ -23,6 +23,7 @@ import simd
 
 struct GalaxySphereView: NSViewRepresentable {
     @ObservedObject var model: GalaxyModel
+    let reverseRotation: Bool
 
     func makeCoordinator() -> GalaxySceneCoordinator {
         GalaxySceneCoordinator(model: model)
@@ -34,7 +35,8 @@ struct GalaxySphereView: NSViewRepresentable {
         context.coordinator.update(
             items: model.items,
             fontScale: model.fontScale,
-            selectedID: model.selectedClip?.id
+            selectedID: model.selectedClip?.id,
+            reverseRotation: reverseRotation
         )
         return view
     }
@@ -43,7 +45,8 @@ struct GalaxySphereView: NSViewRepresentable {
         context.coordinator.update(
             items: model.items,
             fontScale: model.fontScale,
-            selectedID: model.selectedClip?.id
+            selectedID: model.selectedClip?.id,
+            reverseRotation: reverseRotation
         )
     }
 
@@ -77,7 +80,9 @@ final class GalaxySceneView: SCNView {
         if let mouseDownPoint, hypot(point.x - mouseDownPoint.x, point.y - mouseDownPoint.y) > 3 {
             didDrag = true
         }
-        interactionCoordinator?.drag(to: point, time: event.timestamp)
+        if didDrag {
+            interactionCoordinator?.drag(to: point, time: event.timestamp)
+        }
     }
 
     override func mouseUp(with event: NSEvent) {
@@ -91,8 +96,37 @@ final class GalaxySceneView: SCNView {
     }
 
     override func scrollWheel(with event: NSEvent) {
-        let sensitivity = event.hasPreciseScrollingDeltas ? 0.006 : 0.075
-        interactionCoordinator?.zoom(by: exp(event.scrollingDeltaY * sensitivity))
+        // Discrete wheel events have no gesture phase. Precise, phase-bearing
+        // scrolls rotate the sphere; momentum is handled by our own inertia.
+        guard event.momentumPhase == [] else { return }
+        if event.phase == [] {
+            guard event.scrollingDeltaY != 0 else { return }
+            let sensitivity = event.hasPreciseScrollingDeltas ? 0.006 : 0.075
+            interactionCoordinator?.zoom(by: exp(event.scrollingDeltaY * sensitivity))
+            return
+        }
+        guard event.hasPreciseScrollingDeltas else { return }
+        // Natural scrolling can invert AppKit's deltas; use physical finger motion.
+        let deviceDirection: CGFloat = event.isDirectionInvertedFromDevice ? -1 : 1
+        switch event.phase {
+        case .began:
+            interactionCoordinator?.beginSwipe()
+            interactionCoordinator?.swipe(
+                byX: event.scrollingDeltaX * deviceDirection,
+                y: event.scrollingDeltaY * deviceDirection,
+                time: event.timestamp
+            )
+        case .changed:
+            interactionCoordinator?.swipe(
+                byX: event.scrollingDeltaX * deviceDirection,
+                y: event.scrollingDeltaY * deviceDirection,
+                time: event.timestamp
+            )
+        case .ended, .cancelled:
+            interactionCoordinator?.endSwipe()
+        default:
+            break
+        }
     }
 
     override func magnify(with event: NSEvent) {
@@ -112,7 +146,7 @@ final class GalaxySceneView: SCNView {
 final class GalaxySceneCoordinator: NSObject {
     private static let sphereRadius: CGFloat = 1.48
     private static let maximumTextAngle: Float = 1.18
-    private static let fontAngleScale: CGFloat = 0.0027
+    private static let fontAngleScale: CGFloat = 0.00325
     private static let baseAutoRotate: Float = 0.06
 
     private struct RenderedLabel {
@@ -132,6 +166,7 @@ final class GalaxySceneCoordinator: NSObject {
     private var latestItems: [GalaxyItem] = []
     private var renderedSignature: Int?
     private var selectedID: Int64?
+    private var reverseRotation = false
 
     private var yaw: Float = 0.18
     private var pitch: Float = -0.08
@@ -139,6 +174,8 @@ final class GalaxySceneCoordinator: NSObject {
     private var pitchVelocity: Float = 0
     private var lastFrameTime: TimeInterval?
     private var lastDrag: (point: CGPoint, time: TimeInterval)?
+    private var isSwiping = false
+    private var lastSwipeTime: TimeInterval?
 
     init(model: GalaxyModel) {
         self.model = model
@@ -161,7 +198,6 @@ final class GalaxySceneCoordinator: NSObject {
         view.isPlaying = true
         view.autoenablesDefaultLighting = false
         view.allowsCameraControl = false
-        view.allowedTouchTypes = [.indirect]
         startTimer()
     }
 
@@ -169,6 +205,9 @@ final class GalaxySceneCoordinator: NSObject {
         timer?.invalidate()
         timer = nil
         lastFrameTime = nil
+        lastDrag = nil
+        isSwiping = false
+        lastSwipeTime = nil
         view?.isPlaying = false
     }
 
@@ -179,8 +218,18 @@ final class GalaxySceneCoordinator: NSObject {
         startTimer()
     }
 
-    func update(items: [GalaxyItem], fontScale: Double, selectedID: Int64?) {
+    func update(
+        items: [GalaxyItem],
+        fontScale: Double,
+        selectedID: Int64?,
+        reverseRotation: Bool
+    ) {
         latestItems = items
+        if self.reverseRotation != reverseRotation {
+            self.reverseRotation = reverseRotation
+            yawVelocity = selectedID == nil ? Self.baseAutoRotate : 0
+            pitchVelocity = 0
+        }
         let signature = itemSignature(items)
 
         if renderedSignature != signature {
@@ -202,16 +251,45 @@ final class GalaxySceneCoordinator: NSObject {
         let deltaX = Float(point.x - previous.point.x)
         let deltaY = Float(point.y - previous.point.y)
         let deltaTime = max(0.008, time - previous.time)
-        yaw -= deltaX * 0.005
-        pitch = min(max(pitch - deltaY * 0.005, -1.35), 1.35)
-        yawVelocity = -deltaX * 0.005 / Float(deltaTime)
-        pitchVelocity = -deltaY * 0.005 / Float(deltaTime)
+        let direction: Float = reverseRotation ? -1 : 1
+        let yawDelta = deltaX * 0.005 * direction
+        let pitchDelta = -deltaY * 0.005 * direction
+        yaw += yawDelta
+        pitch = min(max(pitch + pitchDelta, -1.35), 1.35)
+        yawVelocity = yawDelta / Float(deltaTime)
+        pitchVelocity = pitchDelta / Float(deltaTime)
         lastDrag = (point, time)
         applyRotation()
     }
 
     func endDrag() {
         lastDrag = nil
+        yawVelocity = min(max(yawVelocity, -4), 4)
+        pitchVelocity = min(max(pitchVelocity, -4), 4)
+    }
+
+    func beginSwipe() {
+        isSwiping = true
+        lastSwipeTime = nil
+    }
+
+    func swipe(byX deltaX: CGFloat, y deltaY: CGFloat, time: TimeInterval) {
+        guard isSwiping else { return }
+        let deltaTime = Float(max(0.008, lastSwipeTime.map { time - $0 } ?? 1.0 / 60.0))
+        let direction: Float = reverseRotation ? -1 : 1
+        let yawDelta = Float(deltaX) * 0.003 * direction
+        let pitchDelta = -Float(deltaY) * 0.003 * direction
+        yaw += yawDelta
+        pitch = min(max(pitch + pitchDelta, -1.35), 1.35)
+        yawVelocity = yawVelocity * 0.65 + (yawDelta / deltaTime) * 0.35
+        pitchVelocity = pitchVelocity * 0.65 + (pitchDelta / deltaTime) * 0.35
+        lastSwipeTime = time
+        applyRotation()
+    }
+
+    func endSwipe() {
+        isSwiping = false
+        lastSwipeTime = nil
         yawVelocity = min(max(yawVelocity, -4), 4)
         pitchVelocity = min(max(pitchVelocity, -4), 4)
     }
@@ -278,6 +356,7 @@ final class GalaxySceneCoordinator: NSObject {
                 angularHeight: layout.angularHeight,
                 selected: item.clipId == selectedID
             )
+            node.opacity = selectedID == nil || item.clipId == selectedID ? 1 : 0.38
             labelsRoot.addChildNode(node)
             labels[item.clipId] = RenderedLabel(
                 item: item,
@@ -317,8 +396,16 @@ final class GalaxySceneCoordinator: NSObject {
         guard selectedID != newSelection else { return }
         let previousSelection = selectedID
         selectedID = newSelection
+
+        SCNTransaction.begin()
+        SCNTransaction.animationDuration = 0.24
+        SCNTransaction.animationTimingFunction = CAMediaTimingFunction(name: .easeOut)
+        for (clipID, label) in labels {
+            label.node.opacity = newSelection == nil || clipID == newSelection ? 1 : 0.38
+        }
         updateMaterial(for: previousSelection, selected: false)
         updateMaterial(for: newSelection, selected: true)
+        SCNTransaction.commit()
     }
 
     private func updateMaterial(for clipID: Int64?, selected: Bool) {
@@ -573,12 +660,21 @@ final class GalaxySceneCoordinator: NSObject {
         let delta = Float(min(0.05, lastFrameTime.map { now - $0 } ?? 1.0 / 60.0))
         lastFrameTime = now
 
-        guard lastDrag == nil else { return }
+        if isSwiping, let lastSwipeTime, now - lastSwipeTime > 0.2 {
+            endSwipe()
+        }
+        guard lastDrag == nil, !isSwiping else { return }
         yaw += yawVelocity * delta
         pitch = min(max(pitch + pitchVelocity * delta, -1.35), 1.35)
-        yawVelocity = Self.baseAutoRotate
-            + (yawVelocity - Self.baseAutoRotate) * pow(0.05, delta)
-        pitchVelocity *= pow(0.02, delta)
+
+        if selectedID != nil {
+            yawVelocity *= pow(0.0001, delta)
+            pitchVelocity *= pow(0.0001, delta)
+        } else {
+            yawVelocity = Self.baseAutoRotate
+                + (yawVelocity - Self.baseAutoRotate) * pow(0.05, delta)
+            pitchVelocity *= pow(0.02, delta)
+        }
         applyRotation()
     }
 

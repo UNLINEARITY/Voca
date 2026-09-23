@@ -73,7 +73,11 @@ final class GalaxyLensMetalView: MTKView {
         if window == nil {
             pauseRendering()
         } else {
-            resumeRendering()
+            // SwiftUI can attach this view before its window is ordered onscreen.
+            DispatchQueue.main.async { [weak self] in
+                guard let self, self.window?.isVisible == true else { return }
+                self.resumeRendering()
+            }
         }
     }
 
@@ -101,7 +105,25 @@ private struct GalaxyLensUniforms {
     var tuning = SIMD4<Float>(2.0, 1.0, 0.30, 0.16)
 }
 
-private final class GalaxyLensRenderer: NSObject, MTKViewDelegate, SCStreamOutput, SCStreamDelegate {
+private final class GalaxyLensOutput: NSObject, SCStreamOutput {
+    weak var renderer: GalaxyLensRenderer?
+    let generation: Int
+
+    init(renderer: GalaxyLensRenderer, generation: Int) {
+        self.renderer = renderer
+        self.generation = generation
+    }
+
+    func stream(
+        _ stream: SCStream,
+        didOutputSampleBuffer sampleBuffer: CMSampleBuffer,
+        of outputType: SCStreamOutputType
+    ) {
+        renderer?.receive(sampleBuffer, outputType: outputType, generation: generation)
+    }
+}
+
+private final class GalaxyLensRenderer: NSObject, MTKViewDelegate, SCStreamDelegate {
     private static let captureQueue = DispatchQueue(
         label: "local.voca.galaxy-lens.capture",
         qos: .userInteractive
@@ -113,9 +135,14 @@ private final class GalaxyLensRenderer: NSObject, MTKViewDelegate, SCStreamOutpu
     private let textureCache: CVMetalTextureCache
     private let textureLock = NSLock()
     private var capturedTexture: (reference: CVMetalTexture, texture: MTLTexture)?
+    private var activeFrameGeneration = 0 // Protected by textureLock.
     private var stream: SCStream?
+    private var streamOutput: GalaxyLensOutput?
     private var isStartingCapture = false
     private var hasRequestedPermission = false
+    private var captureGeneration = 0
+    private var retryCount = 0
+    private static let maximumRetries = 3
     private var captureDisplayID: CGDirectDisplayID?
     private let startedAt = CACurrentMediaTime()
 
@@ -152,7 +179,8 @@ private final class GalaxyLensRenderer: NSObject, MTKViewDelegate, SCStreamOutpu
     }
 
     func startCaptureIfNeeded() {
-        guard stream == nil, !isStartingCapture, let view, view.window != nil else { return }
+        guard stream == nil, !isStartingCapture,
+              let view, !view.isPaused, view.window?.isVisible == true else { return }
 
         if !CGPreflightScreenCaptureAccess() {
             guard !hasRequestedPermission else { return }
@@ -164,29 +192,68 @@ private final class GalaxyLensRenderer: NSObject, MTKViewDelegate, SCStreamOutpu
         }
 
         isStartingCapture = true
+        let generation = captureGeneration
         SCShareableContent.getExcludingDesktopWindows(
             false,
             onScreenWindowsOnly: true
         ) { [weak self] content, error in
             DispatchQueue.main.async {
-                self?.configureCapture(content: content, error: error)
+                guard let self, self.captureGeneration == generation else { return }
+                self.configureCapture(content: content, error: error)
             }
         }
     }
 
     func stopCapture() {
+        retryCount = 0
+        resetCapture()
+    }
+
+    private func resetCapture() {
+        captureGeneration += 1
         isStartingCapture = false
-        guard let stream else {
-            clearCapturedTexture()
-            return
-        }
-        self.stream = nil
+        let previousStream = stream
+        stream = nil
+        streamOutput = nil
         captureDisplayID = nil
-        stream.stopCapture { [weak self] error in
+        textureLock.lock()
+        activeFrameGeneration = captureGeneration
+        capturedTexture = nil
+        textureLock.unlock()
+        CVMetalTextureCacheFlush(textureCache, 0)
+        previousStream?.stopCapture { error in
             if let error {
                 NSLog("Voca: Failed to stop galaxy lens capture: %@", error.localizedDescription)
             }
-            self?.clearCapturedTexture()
+        }
+    }
+
+    private func retryCapture() {
+        guard let view, !view.isPaused, view.window?.isVisible == true,
+              retryCount < Self.maximumRetries else { return }
+        retryCount += 1
+        resetCapture()
+        let generation = captureGeneration
+        let delay = 0.5 * Double(retryCount)
+        DispatchQueue.main.asyncAfter(deadline: .now() + delay) { [weak self] in
+            guard let self, self.captureGeneration == generation else { return }
+            self.startCaptureIfNeeded()
+        }
+    }
+
+    private func checkFirstFrame(for stream: SCStream, generation: Int) {
+        DispatchQueue.main.asyncAfter(deadline: .now() + 2) { [weak self, weak stream] in
+            guard let self, self.captureGeneration == generation,
+                  self.stream === stream else { return }
+            self.textureLock.lock()
+            let hasFrame = self.capturedTexture != nil
+            self.textureLock.unlock()
+            if hasFrame {
+                self.retryCount = 0
+            } else {
+                NSLog("Voca: Galaxy lens received no first frame; retrying capture")
+                self.retryCapture()
+            }
         }
     }
 
@@ -196,6 +263,7 @@ private final class GalaxyLensRenderer: NSObject, MTKViewDelegate, SCStreamOutpu
 
         if let error {
             NSLog("Voca: Unable to inspect screen content for the galaxy lens: %@", error.localizedDescription)
+            retryCapture()
             return
         }
         guard let view,
@@ -206,6 +274,7 @@ private final class GalaxyLensRenderer: NSObject, MTKViewDelegate, SCStreamOutpu
                   $0.displayID == CGDirectDisplayID(screenNumber.uint32Value)
               }) else {
             NSLog("Voca: Unable to match the galaxy window to a capturable display")
+            retryCapture()
             return
         }
 
@@ -214,6 +283,7 @@ private final class GalaxyLensRenderer: NSObject, MTKViewDelegate, SCStreamOutpu
             $0.processID == currentProcessID
         }) else {
             NSLog("Voca: Refusing to start the galaxy lens because Voca could not be excluded from capture")
+            retryCapture()
             return
         }
         let filter = SCContentFilter(
@@ -231,31 +301,41 @@ private final class GalaxyLensRenderer: NSObject, MTKViewDelegate, SCStreamOutpu
         configuration.capturesAudio = false
 
         let stream = SCStream(filter: filter, configuration: configuration, delegate: self)
+        let output = GalaxyLensOutput(renderer: self, generation: captureGeneration)
         do {
-            try stream.addStreamOutput(self, type: .screen, sampleHandlerQueue: Self.captureQueue)
+            try stream.addStreamOutput(output, type: .screen, sampleHandlerQueue: Self.captureQueue)
         } catch {
             NSLog("Voca: Unable to connect the galaxy lens capture output: %@", error.localizedDescription)
+            retryCapture()
             return
         }
 
         self.stream = stream
+        streamOutput = output
         captureDisplayID = display.displayID
+        let generation = captureGeneration
         stream.startCapture { [weak self, weak stream] error in
             if let error {
                 NSLog("Voca: Unable to start the galaxy lens capture: %@", error.localizedDescription)
                 DispatchQueue.main.async {
-                    if self?.stream === stream {
-                        self?.stream = nil
-                    }
+                    guard let self, self.captureGeneration == generation,
+                          self.stream === stream else { return }
+                    self.retryCapture()
+                }
+            } else {
+                DispatchQueue.main.async {
+                    guard let self, self.captureGeneration == generation,
+                          let stream else { return }
+                    self.checkFirstFrame(for: stream, generation: generation)
                 }
             }
         }
     }
 
-    func stream(
-        _ stream: SCStream,
-        didOutputSampleBuffer sampleBuffer: CMSampleBuffer,
-        of outputType: SCStreamOutputType
+    func receive(
+        _ sampleBuffer: CMSampleBuffer,
+        outputType: SCStreamOutputType,
+        generation: Int
     ) {
         guard outputType == .screen,
               sampleBuffer.isValid,
@@ -280,17 +360,17 @@ private final class GalaxyLensRenderer: NSObject, MTKViewDelegate, SCStreamOutpu
               let texture = CVMetalTextureGetTexture(textureReference) else { return }
 
         textureLock.lock()
-        capturedTexture = (textureReference, texture)
+        if activeFrameGeneration == generation {
+            capturedTexture = (textureReference, texture)
+        }
         textureLock.unlock()
     }
 
     func stream(_ stream: SCStream, didStopWithError error: Error) {
         NSLog("Voca: Galaxy lens capture stopped: %@", error.localizedDescription)
         DispatchQueue.main.async { [weak self, weak stream] in
-            if self?.stream === stream {
-                self?.stream = nil
-                self?.clearCapturedTexture()
-            }
+            guard let self, self.stream === stream else { return }
+            self.retryCapture()
         }
     }
 
@@ -377,13 +457,6 @@ private final class GalaxyLensRenderer: NSObject, MTKViewDelegate, SCStreamOutpu
                 Float(tuning.fresnelTint)
             )
         )
-    }
-
-    private func clearCapturedTexture() {
-        textureLock.lock()
-        capturedTexture = nil
-        textureLock.unlock()
-        CVMetalTextureCacheFlush(textureCache, 0)
     }
 
     private enum GalaxyLensError: Error {

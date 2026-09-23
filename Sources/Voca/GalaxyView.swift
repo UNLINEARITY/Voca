@@ -34,6 +34,9 @@ final class GalaxyTuning: ObservableObject {
     @Published var ringScale: Double { didSet { save("ringScale", ringScale) } }
     @Published var coreDarkCenter: Double { didSet { save("coreDarkCenter", coreDarkCenter) } }
     @Published var coreDarkEdge: Double { didSet { save("coreDarkEdge", coreDarkEdge) } }
+    @Published var reverseRotation: Bool {
+        didSet { UserDefaults.standard.set(reverseRotation, forKey: "gt.reverseRotation") }
+    }
 
     init() {
         let defaults = UserDefaults.standard
@@ -47,6 +50,7 @@ final class GalaxyTuning: ObservableObject {
         ringScale = defaults.object(forKey: "gt.ringScale") as? Double ?? 1.25
         coreDarkCenter = defaults.object(forKey: "gt.coreDarkCenter") as? Double ?? 0.10
         coreDarkEdge = defaults.object(forKey: "gt.coreDarkEdge") as? Double ?? 0.28
+        reverseRotation = defaults.bool(forKey: "gt.reverseRotation")
     }
 
     private func save(_ name: String, _ value: Double) {
@@ -57,6 +61,7 @@ final class GalaxyTuning: ObservableObject {
         dispersion = 20; chromaExponent = 2.0; refraction = 0.85; warpFalloff = 1.0
         rimStrength = 0.30; fresnelTint = 0.16; sphereScale = 0.40; ringScale = 1.25
         coreDarkCenter = 0.10; coreDarkEdge = 0.28
+        reverseRotation = false
     }
 }
 
@@ -126,7 +131,7 @@ final class GalaxyModel: ObservableObject {
     }
 
     func zoom(by factor: Double) {
-        fontScale = (fontScale * factor).clamped(to: 0.5...2.5)
+        fontScale = min(max(fontScale * factor, 0.5), 2.5)
     }
 
     static func fontSize(for count: Int) -> CGFloat {
@@ -170,7 +175,6 @@ final class GalaxyWindowController {
         if let existingWindow = self.window {
             window = existingWindow
             window.setFrame(screenFrame, display: true)
-            setGalaxyRendering(paused: false, in: window.contentView)
         } else {
             let contentView = GalaxyView(model: model)
                 .environmentObject(AppModel.shared.store)
@@ -193,6 +197,7 @@ final class GalaxyWindowController {
         installEventMonitor()
         window.makeKeyAndOrderFront(nil)
         NSApp.activate(ignoringOtherApps: true)
+        setGalaxyRendering(paused: false, in: window.contentView)
     }
 
     func close() {
@@ -241,13 +246,26 @@ final class GalaxyWindowController {
 
 // MARK: - 星图视图
 
+private enum GalaxySelectionMode {
+    case attributes
+    case timeline
+}
+
+private enum GalaxyOrbitSide {
+    case left
+    case right
+}
+
 private struct GalaxyView: View {
     @ObservedObject var model: GalaxyModel
     @ObservedObject private var tuning = GalaxyTuning.shared
     @EnvironmentObject private var store: ClipStore
     @EnvironmentObject private var watcher: ClipboardWatcher
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
     @State private var editingClip: Clip?
     @State private var timelineEvents: [ClipEvent] = []
+    @State private var selectionMode = GalaxySelectionMode.attributes
+    @State private var selectedTimelineIndex = 0
     @State private var showTuning = false
 
     var body: some View {
@@ -261,7 +279,11 @@ private struct GalaxyView: View {
                 VStack {
                     topBar
                     Spacer()
-                    hintBar
+                    if let clip = model.selectedClip {
+                        selectionActions(clip)
+                    } else {
+                        hintBar
+                    }
                 }
                 .padding(20)
 
@@ -277,22 +299,25 @@ private struct GalaxyView: View {
                 }
 
                 if let clip = model.selectedClip {
-                    HStack {
-                        Spacer()
-                        detailPanel(
-                            clip,
-                            maximumHeight: min(geometry.size.height - 128, 680)
-                        )
-                        .padding(.trailing, 24)
-                    }
-                    .transition(.move(edge: .trailing).combined(with: .opacity))
+                    selectionOrbit(
+                        clip,
+                        sphereDiameter: radius * 2,
+                        canvasSize: geometry.size
+                    )
+                    .transition(selectionTransition)
                 }
             }
-            .animation(.snappy(duration: 0.28), value: model.selectedClip?.id)
+            .animation(selectionAnimation, value: model.selectedClip?.id)
+            .animation(selectionAnimation, value: selectionMode)
         }
         .background(.clear)
         .onChange(of: model.selectedClip) { _, clip in
             timelineEvents = clip.map { store.events(for: $0) } ?? []
+            selectionMode = .attributes
+            selectedTimelineIndex = 0
+            if clip != nil {
+                showTuning = false
+            }
         }
         .sheet(item: $editingClip) { clip in
             EditClipSheet(clip: clip) { text, note in
@@ -373,7 +398,7 @@ private struct GalaxyView: View {
                     )
                     .frame(maxWidth: diameter * 0.56)
                 } else {
-                    GalaxySphereView(model: model)
+                    GalaxySphereView(model: model, reverseRotation: tuning.reverseRotation)
                 }
             }
             .frame(width: diameter, height: diameter)
@@ -423,7 +448,7 @@ private struct GalaxyView: View {
     }
 
     private var hintBar: some View {
-        Text("拖拽旋转 · 滚轮/捏合缩放字号 · 点击词条查看详情 · ESC 退出")
+        Text("拖拽或双指滑动旋转 · 滚轮/捏合/调参调整字号 · 点击词条展开轨道 · ESC 退出")
             .font(.caption)
             .foregroundStyle(.secondary)
             .padding(.horizontal, 16)
@@ -440,8 +465,11 @@ private struct GalaxyView: View {
                     Label("实时调参", systemImage: "slider.horizontal.3")
                         .font(.headline)
                     Spacer()
-                    Button("重置") { tuning.reset() }
-                        .buttonStyle(.glass)
+                    Button("重置") {
+                        tuning.reset()
+                        model.fontScale = 1.0
+                    }
+                    .buttonStyle(.glass)
                     Button {
                         showTuning = false
                     } label: {
@@ -449,6 +477,17 @@ private struct GalaxyView: View {
                     }
                     .buttonStyle(.glass)
                 }
+
+                Picker("旋转方向", selection: $tuning.reverseRotation) {
+                    Text("正向").tag(false)
+                    Text("反向").tag(true)
+                }
+                .pickerStyle(.segmented)
+                Text("正向：文字跟随指针或手指移动")
+                    .font(.caption2)
+                    .foregroundStyle(.secondary)
+
+                Divider()
 
                 tuningSlider("色散强度", value: $tuning.dispersion, range: 0...30, format: "%.1f")
                 tuningSlider("色散分布", value: $tuning.chromaExponent, range: 1...4, format: "%.2f")
@@ -459,6 +498,7 @@ private struct GalaxyView: View {
 
                 Divider()
 
+                tuningSlider("文字大小", value: $model.fontScale, range: 0.5...2.5, format: "%.2f×")
                 tuningSlider("球体大小", value: $tuning.sphereScale, range: 0.25...0.48, format: "%.2f")
                 tuningSlider("环宽倍数", value: $tuning.ringScale, range: 1.05...1.6, format: "%.2f")
                 tuningSlider("磨砂中心暗度", value: $tuning.coreDarkCenter, range: 0...0.4, format: "%.2f")
@@ -492,225 +532,485 @@ private struct GalaxyView: View {
         }
     }
 
-    // MARK: 详情面板
+    // MARK: 选择轨道
 
-    private func detailPanel(_ clip: Clip, maximumHeight: CGFloat) -> some View {
-        VStack(spacing: 0) {
-            ScrollView {
-                VStack(alignment: .leading, spacing: 0) {
-                    detailHeader(clip)
+    private static let maximumTimelineTicks = 32
 
-                    if let note = clip.note, !note.isEmpty {
-                        noteSection(note)
-                            .padding(.top, 16)
-                    }
+    private var selectionAnimation: Animation {
+        reduceMotion ? .linear(duration: 0.12) : .snappy(duration: 0.30)
+    }
 
-                    metadataSection(clip)
-                        .padding(.vertical, 15)
+    private var selectionTransition: AnyTransition {
+        reduceMotion
+            ? .opacity
+            : .opacity.combined(with: .scale(scale: 0.985))
+    }
 
-                    Divider()
+    private var visibleTimelineEvents: [ClipEvent] {
+        Array(timelineEvents.prefix(Self.maximumTimelineTicks))
+    }
 
-                    timelineSection
-                        .padding(.top, 15)
-                }
-                .padding(.horizontal, 18)
-                .padding(.top, 18)
-                .padding(.bottom, 12)
+    private var selectedTimelineEvent: ClipEvent? {
+        let events = visibleTimelineEvents
+        guard events.indices.contains(selectedTimelineIndex) else { return nil }
+        return events[selectedTimelineIndex]
+    }
+
+    private func selectionOrbit(
+        _ clip: Clip,
+        sphereDiameter: CGFloat,
+        canvasSize: CGSize
+    ) -> some View {
+        let sphereRadius = sphereDiameter / 2
+        let lensRadius = sphereRadius * tuning.ringScale
+        let preferredRadius = (sphereRadius + lensRadius) / 2
+        let verticalLimit = max(120, canvasSize.height / 2 - 72)
+        let orbitRadius = min(preferredRadius, verticalLimit)
+        let sideRoom = (canvasSize.width - orbitRadius * 2) / 2 - 32
+        let sideWidth = min(260, max(120, sideRoom))
+        let verticalOffset = min(190, orbitRadius * 0.48)
+
+        return ZStack {
+            switch selectionMode {
+            case .attributes:
+                attributeOrbit(
+                    clip,
+                    canvasSize: canvasSize,
+                    radius: orbitRadius,
+                    sideWidth: sideWidth,
+                    verticalOffset: verticalOffset
+                )
+                .transition(.opacity)
+            case .timeline:
+                timelineOrbit(
+                    canvasSize: canvasSize,
+                    radius: orbitRadius,
+                    sideWidth: sideWidth
+                )
+                .transition(.opacity)
+            }
+        }
+        .frame(width: canvasSize.width, height: canvasSize.height)
+        .accessibilityElement(children: .contain)
+        .accessibilityLabel(selectionMode == .attributes ? "词条属性" : "词条时间线")
+    }
+
+    private func attributeOrbit(
+        _ clip: Clip,
+        canvasSize: CGSize,
+        radius: CGFloat,
+        sideWidth: CGFloat,
+        verticalOffset: CGFloat
+    ) -> some View {
+        let center = CGPoint(x: canvasSize.width / 2, y: canvasSize.height / 2)
+        let leftX = center.x - radius - 24 - sideWidth / 2
+        let rightX = center.x + radius + 24 + sideWidth / 2
+        let note = clip.note?.trimmingCharacters(in: .whitespacesAndNewlines)
+        let noteText = note.flatMap { $0.isEmpty ? nil : $0 } ?? "无注释"
+        let sourceURL = clip.url.flatMap(URL.init(string:))
+        let sourceName = sourceURL?.host ?? "无网页来源"
+
+        return ZStack {
+            orbitConnectorGuide(
+                canvasSize: canvasSize,
+                radius: radius,
+                verticalOffsets: [-verticalOffset, 0, verticalOffset]
+            )
+
+            orbitAttribute(
+                title: "来源应用",
+                value: clip.appName ?? "未知来源",
+                systemImage: "app.dashed",
+                side: .left
+            )
+            .frame(width: sideWidth)
+            .position(x: leftX, y: center.y - verticalOffset)
+
+            orbitAttribute(
+                title: "注释",
+                value: noteText,
+                systemImage: "quote.opening",
+                side: .left,
+                lineLimit: 2
+            )
+            .frame(width: sideWidth)
+            .position(x: leftX, y: center.y)
+
+            if let sourceURL {
+                orbitAttribute(
+                    title: "来源网页",
+                    value: sourceName,
+                    systemImage: "link",
+                    side: .left,
+                    action: { NSWorkspace.shared.open(sourceURL) }
+                )
+                .frame(width: sideWidth)
+                .position(x: leftX, y: center.y + verticalOffset)
+            } else {
+                orbitAttribute(
+                    title: "来源网页",
+                    value: sourceName,
+                    systemImage: "link",
+                    side: .left
+                )
+                .frame(width: sideWidth)
+                .position(x: leftX, y: center.y + verticalOffset)
             }
 
-            Divider()
-                .padding(.horizontal, 18)
+            orbitAttribute(
+                title: "保存次数",
+                value: "\(clip.count) 次",
+                systemImage: "square.stack.3d.up",
+                side: .right
+            )
+            .frame(width: sideWidth)
+            .position(x: rightX, y: center.y - verticalOffset)
 
-            detailActions(clip)
-                .padding(18)
+            orbitAttribute(
+                title: "最近保存",
+                value: clip.lastSeenAt.formatted(date: .abbreviated, time: .shortened),
+                systemImage: "clock",
+                side: .right
+            )
+            .frame(width: sideWidth)
+            .position(x: rightX, y: center.y)
+
+            orbitAttribute(
+                title: "时间线",
+                value: timelineEvents.isEmpty ? "无记录" : "\(timelineEvents.count) 次记录",
+                systemImage: "clock.arrow.trianglehead.counterclockwise.rotate.90",
+                side: .right,
+                action: timelineEvents.isEmpty ? nil : {
+                    withAnimation(selectionAnimation) {
+                        selectedTimelineIndex = 0
+                        selectionMode = .timeline
+                    }
+                }
+            )
+            .frame(width: sideWidth)
+            .position(x: rightX, y: center.y + verticalOffset)
         }
-        .frame(width: 390)
-        .frame(maxHeight: maximumHeight)
-        .glassEffect(
-            .regular.interactive(),
-            in: RoundedRectangle(cornerRadius: 24, style: .continuous)
+    }
+
+    private func timelineOrbit(
+        canvasSize: CGSize,
+        radius: CGFloat,
+        sideWidth: CGFloat
+    ) -> some View {
+        let center = CGPoint(x: canvasSize.width / 2, y: canvasSize.height / 2)
+        let leftX = center.x - radius - 24 - sideWidth / 2
+        let rightX = center.x + radius + 24 + sideWidth / 2
+        let events = visibleTimelineEvents
+
+        return ZStack {
+            Circle()
+                .stroke(
+                    .secondary.opacity(0.18),
+                    style: StrokeStyle(lineWidth: 0.75, dash: [1.5, 6])
+                )
+                .frame(width: radius * 2, height: radius * 2)
+                .position(center)
+                .allowsHitTesting(false)
+
+            if events.isEmpty {
+                orbitConnectorGuide(
+                    canvasSize: canvasSize,
+                    radius: radius,
+                    verticalOffsets: [0]
+                )
+                orbitAttribute(
+                    title: "时间线",
+                    value: "暂无记录",
+                    systemImage: "clock",
+                    side: .left
+                )
+                .frame(width: sideWidth)
+                .position(x: leftX, y: center.y)
+            } else {
+                ForEach(Array(events.enumerated()), id: \.offset) { index, event in
+                    let angle = -Double.pi / 2
+                        + Double(index) / Double(events.count) * Double.pi * 2
+                    let point = CGPoint(
+                        x: center.x + cos(angle) * radius,
+                        y: center.y + sin(angle) * radius
+                    )
+
+                    timelineTick(event, index: index, angle: angle)
+                        .position(point)
+                }
+
+                orbitConnectorGuide(
+                    canvasSize: canvasSize,
+                    radius: radius,
+                    verticalOffsets: [0]
+                )
+
+                if let event = selectedTimelineEvent {
+                    orbitAttribute(
+                        title: "发生时间",
+                        value: event.date.formatted(date: .abbreviated, time: .shortened),
+                        systemImage: "clock",
+                        side: .left
+                    )
+                    .frame(width: sideWidth)
+                    .position(x: leftX, y: center.y)
+
+                    if let urlString = event.url, let url = URL(string: urlString) {
+                        orbitAttribute(
+                            title: "来源",
+                            value: timelineSource(for: event),
+                            systemImage: "link",
+                            side: .right,
+                            action: { NSWorkspace.shared.open(url) }
+                        )
+                        .frame(width: sideWidth)
+                        .position(x: rightX, y: center.y)
+                    } else {
+                        orbitAttribute(
+                            title: "来源",
+                            value: timelineSource(for: event),
+                            systemImage: "app.dashed",
+                            side: .right
+                        )
+                        .frame(width: sideWidth)
+                        .position(x: rightX, y: center.y)
+                    }
+                }
+
+                if timelineEvents.count > events.count {
+                    Text("最近 \(events.count) / \(timelineEvents.count) 条")
+                        .font(.caption2.monospacedDigit())
+                        .foregroundStyle(.tertiary)
+                        .position(x: center.x, y: center.y + radius - 18)
+                }
+            }
+        }
+    }
+
+    private func orbitConnectorGuide(
+        canvasSize: CGSize,
+        radius: CGFloat,
+        verticalOffsets: [CGFloat]
+    ) -> some View {
+        Canvas { context, size in
+            let center = CGPoint(x: size.width / 2, y: size.height / 2)
+            for offset in verticalOffsets {
+                let horizontal = sqrt(max(0, radius * radius - offset * offset))
+                for direction in [-1.0, 1.0] {
+                    let start = CGPoint(
+                        x: center.x + horizontal * direction,
+                        y: center.y + offset
+                    )
+                    let end = CGPoint(
+                        x: center.x + (radius + 18) * direction,
+                        y: center.y + offset
+                    )
+                    var path = Path()
+                    path.move(to: start)
+                    path.addLine(to: end)
+                    context.stroke(path, with: .color(.secondary.opacity(0.32)), lineWidth: 0.75)
+                    context.fill(
+                        Path(ellipseIn: CGRect(x: start.x - 2, y: start.y - 2, width: 4, height: 4)),
+                        with: .color(.primary.opacity(0.5))
+                    )
+                }
+            }
+        }
+        .frame(width: canvasSize.width, height: canvasSize.height)
+        .allowsHitTesting(false)
+        .accessibilityHidden(true)
+    }
+
+    private func timelineTick(
+        _ event: ClipEvent,
+        index: Int,
+        angle: Double
+    ) -> some View {
+        let selected = index == selectedTimelineIndex
+        return Button {
+            withAnimation(selectionAnimation) {
+                selectedTimelineIndex = index
+            }
+        } label: {
+            Capsule()
+                .fill(selected ? Color.accentColor : Color.secondary.opacity(0.46))
+                .frame(width: selected ? 3 : 1.5, height: selected ? 16 : 10)
+                .frame(width: 20, height: 20)
+                .contentShape(Circle())
+        }
+        .buttonStyle(.plain)
+        .rotationEffect(.radians(angle + Double.pi / 2))
+        .onHover { hovering in
+            guard hovering, selectedTimelineIndex != index else { return }
+            withAnimation(selectionAnimation) {
+                selectedTimelineIndex = index
+            }
+        }
+        .help(
+            "\(event.date.formatted(date: .abbreviated, time: .shortened)) · "
+                + (event.appName ?? "未知来源")
+        )
+        .accessibilityLabel("时间线记录 \(index + 1)")
+        .accessibilityValue(
+            "\(event.date.formatted(date: .abbreviated, time: .shortened))，"
+                + (event.appName ?? "未知来源")
         )
     }
 
-    private func detailHeader(_ clip: Clip) -> some View {
-        HStack(alignment: .top, spacing: 12) {
-            VStack(alignment: .leading, spacing: 5) {
-                Text("词条详情")
-                    .font(.caption.weight(.semibold))
-                    .foregroundStyle(.secondary)
-                Text(clip.text)
-                    .font(.title3.weight(.medium))
-                    .fixedSize(horizontal: false, vertical: true)
-                    .textSelection(.enabled)
+    @ViewBuilder
+    private func orbitAttribute(
+        title: String,
+        value: String,
+        systemImage: String,
+        side: GalaxyOrbitSide,
+        lineLimit: Int = 1,
+        action: (() -> Void)? = nil
+    ) -> some View {
+        if let action {
+            Button(action: action) {
+                orbitAttributeContent(
+                    title: title,
+                    value: value,
+                    systemImage: systemImage,
+                    side: side,
+                    lineLimit: lineLimit,
+                    interactive: true
+                )
             }
-
-            Spacer(minLength: 0)
-
-            Button {
-                model.selectedClip = nil
-            } label: {
-                Image(systemName: "xmark")
-            }
-            .buttonStyle(.glass)
-            .help("关闭（ESC）")
+            .buttonStyle(.plain)
+            .help(value)
+        } else {
+            orbitAttributeContent(
+                title: title,
+                value: value,
+                systemImage: systemImage,
+                side: side,
+                lineLimit: lineLimit,
+                interactive: false
+            )
         }
     }
 
-    private func noteSection(_ note: String) -> some View {
-        VStack(alignment: .leading, spacing: 7) {
-            Label("注释", systemImage: "quote.opening")
-                .font(.caption.weight(.semibold))
-                .foregroundStyle(.secondary)
-            Text(note)
-                .font(.callout)
-                .fixedSize(horizontal: false, vertical: true)
-                .textSelection(.enabled)
+    private func orbitAttributeContent(
+        title: String,
+        value: String,
+        systemImage: String,
+        side: GalaxyOrbitSide,
+        lineLimit: Int,
+        interactive: Bool
+    ) -> some View {
+        HStack(spacing: 9) {
+            if side == .right {
+                Image(systemName: systemImage)
+                    .foregroundStyle(.secondary)
+                    .frame(width: 18)
+                    .accessibilityHidden(true)
+            }
+
+            VStack(alignment: side == .left ? .trailing : .leading, spacing: 2) {
+                Text(title)
+                    .font(.caption2)
+                    .foregroundStyle(.tertiary)
+                Text(value)
+                    .font(.callout.weight(.medium))
+                    .foregroundStyle(.primary)
+                    .lineLimit(lineLimit)
+                    .truncationMode(.tail)
+                    .multilineTextAlignment(side == .left ? .trailing : .leading)
+            }
+
+            if side == .left {
+                Image(systemName: systemImage)
+                    .foregroundStyle(.secondary)
+                    .frame(width: 18)
+                    .accessibilityHidden(true)
+            }
         }
-        .padding(12)
-        .frame(maxWidth: .infinity, alignment: .leading)
-        .background(
-            .white.opacity(0.07),
+        .padding(.horizontal, 12)
+        .padding(.vertical, 8)
+        .frame(
+            maxWidth: .infinity,
+            minHeight: 44,
+            alignment: side == .left ? .trailing : .leading
+        )
+        .glassEffect(
+            interactive ? .regular.interactive() : .regular,
             in: RoundedRectangle(cornerRadius: 12, style: .continuous)
         )
+        .contentShape(Rectangle())
+        .accessibilityElement(children: .ignore)
+        .accessibilityLabel(title)
+        .accessibilityValue(value)
     }
 
-    private func metadataSection(_ clip: Clip) -> some View {
-        VStack(alignment: .leading, spacing: 10) {
-            HStack(spacing: 12) {
-                Label(clip.appName ?? "未知来源", systemImage: "app.dashed")
-                Label("保存 \(clip.count) 次", systemImage: "square.stack.3d.up")
-                Spacer(minLength: 8)
-                Text(clip.lastSeenAt.formatted(date: .abbreviated, time: .shortened))
-            }
-            .font(.caption)
-            .foregroundStyle(.secondary)
-
-            if let urlString = clip.url, let url = URL(string: urlString) {
-                Button {
-                    NSWorkspace.shared.open(url)
-                } label: {
-                    Label {
-                        Text(urlString)
-                            .lineLimit(1)
-                            .truncationMode(.middle)
-                    } icon: {
-                        Image(systemName: "link")
+    private func selectionActions(_ clip: Clip) -> some View {
+        GlassEffectContainer(spacing: 10) {
+            HStack(spacing: 10) {
+                if selectionMode == .timeline {
+                    Button {
+                        withAnimation(selectionAnimation) {
+                            selectionMode = .attributes
+                        }
+                    } label: {
+                        Image(systemName: "arrow.uturn.backward")
+                            .frame(width: 20, height: 20)
                     }
-                }
-                .buttonStyle(.plain)
-                .font(.caption)
-                .foregroundStyle(.secondary)
-                .help(urlString)
-            }
-        }
-    }
+                    .buttonStyle(.glassProminent)
+                    .help("返回词条属性")
 
-    private var timelineSection: some View {
-        VStack(alignment: .leading, spacing: 0) {
-            HStack {
-                Label(
-                    "时间线",
-                    systemImage: "clock.arrow.trianglehead.counterclockwise.rotate.90"
-                )
-                .font(.subheadline.weight(.semibold))
-                Spacer()
-                Text("\(timelineEvents.count) 次记录")
-                    .font(.caption)
-                    .foregroundStyle(.secondary)
-            }
-            .padding(.bottom, 12)
-
-            if timelineEvents.isEmpty {
-                Text("暂无事件（早于时间线功能）")
-                    .font(.caption)
-                    .foregroundStyle(.tertiary)
-                    .padding(.bottom, 4)
-            } else {
-                ForEach(Array(timelineEvents.enumerated()), id: \.offset) { index, event in
-                    timelineRow(event, isLatest: index == 0, isLast: index == timelineEvents.count - 1)
-                }
-            }
-        }
-    }
-
-    private func timelineRow(
-        _ event: ClipEvent,
-        isLatest: Bool,
-        isLast: Bool
-    ) -> some View {
-        HStack(alignment: .top, spacing: 11) {
-            VStack(spacing: 0) {
-                Circle()
-                    .fill(isLatest ? Color.accentColor : Color.secondary.opacity(0.55))
-                    .frame(width: 7, height: 7)
-                if !isLast {
-                    Rectangle()
-                        .fill(.secondary.opacity(0.2))
-                        .frame(width: 1, height: 35)
-                }
-            }
-            .padding(.top, 5)
-
-            VStack(alignment: .leading, spacing: 2) {
-                Text(event.date.formatted(date: .abbreviated, time: .shortened))
-                    .font(.caption.weight(isLatest ? .semibold : .regular))
-                HStack(spacing: 5) {
-                    Text(event.appName ?? "未知来源")
-                    if let urlString = event.url, let url = URL(string: urlString) {
+                    if let urlString = selectedTimelineEvent?.url,
+                       let url = URL(string: urlString) {
                         Button {
                             NSWorkspace.shared.open(url)
                         } label: {
                             Image(systemName: "link")
+                                .frame(width: 20, height: 20)
                         }
-                        .buttonStyle(.plain)
-                        .help(urlString)
+                        .buttonStyle(.glass)
+                        .help("打开这次记录的来源网页")
+                    }
+                } else {
+                    Button {
+                        watcher.copyText(clip.text)
+                    } label: {
+                        Image(systemName: "document.on.document")
+                            .frame(width: 20, height: 20)
+                    }
+                    .buttonStyle(.glassProminent)
+                    .help("复制词条")
+
+                    Button {
+                        editingClip = clip
+                    } label: {
+                        Image(systemName: "pencil")
+                            .frame(width: 20, height: 20)
+                    }
+                    .buttonStyle(.glass)
+                    .help("编辑词条")
+
+                    if let urlString = clip.url, let url = URL(string: urlString) {
+                        Button {
+                            NSWorkspace.shared.open(url)
+                        } label: {
+                            Image(systemName: "link")
+                                .frame(width: 20, height: 20)
+                        }
+                        .buttonStyle(.glass)
+                        .help("打开来源网页")
                     }
                 }
-                .font(.caption)
-                .foregroundStyle(.secondary)
-            }
-            .padding(.bottom, isLast ? 0 : 9)
-
-            Spacer(minLength: 0)
-        }
-    }
-
-    private func detailActions(_ clip: Clip) -> some View {
-        HStack(spacing: 10) {
-            Button {
-                watcher.copyText(clip.text)
-            } label: {
-                Label("复制", systemImage: "doc.on.doc")
-            }
-            .buttonStyle(.glassProminent)
-
-            Button {
-                editingClip = clip
-            } label: {
-                Label("编辑", systemImage: "pencil")
-            }
-            .buttonStyle(.glass)
-
-            Spacer()
-
-            if let urlString = clip.url, let url = URL(string: urlString) {
-                Button {
-                    NSWorkspace.shared.open(url)
-                } label: {
-                    Image(systemName: "link")
-                }
-                .buttonStyle(.glass)
-                .help("打开来源网页")
             }
         }
+        .accessibilityElement(children: .contain)
+        .accessibilityLabel(selectionMode == .timeline ? "时间线操作" : "词条操作")
     }
 
-}
-
-// MARK: - 工具
-
-private extension Comparable {
-    func clamped(to range: ClosedRange<Self>) -> Self {
-        min(max(self, range.lowerBound), range.upperBound)
+    private func timelineSource(for event: ClipEvent) -> String {
+        let appName = event.appName ?? "未知来源"
+        guard let urlString = event.url,
+              let host = URL(string: urlString)?.host else {
+            return appName
+        }
+        return "\(appName) · \(host)"
     }
 }
