@@ -449,6 +449,7 @@ private struct GalaxyView: View {
     @EnvironmentObject private var watcher: ClipboardWatcher
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
     @State private var editingClip: Clip?
+    @State private var deletingEntry: GalaxyEntry?
     @State private var promotedIDs: Set<UUID> = []
     @State private var timelineEvents: [ClipEvent] = []
     @State private var selectedTimelineIndex = 0
@@ -535,6 +536,47 @@ private struct GalaxyView: View {
                     model.selectedItem = model.items.first { $0.clipId == id }
                 }
             }
+        }
+        .confirmationDialog(
+            deletingClipboard ? "移除这条剪贴板历史？" : "删除这条词库记录？",
+            isPresented: .init(
+                get: { deletingEntry != nil },
+                set: { if !$0 { deletingEntry = nil } }
+            ),
+            titleVisibility: .visible
+        ) {
+            Button(
+                deletingClipboard ? "移除剪贴板记录" : "删除词库记录（不可恢复）",
+                role: .destructive
+            ) {
+                deleteSelectedEntry()
+            }
+            Button("取消", role: .cancel) {
+                deletingEntry = nil
+            }
+        } message: {
+            Text(deletingClipboard
+                ? "仅从剪贴板历史移除，不影响已入库的词条。"
+                : "将永久删除该词库记录及其全部时间线事件，不影响剪贴板历史。")
+        }
+    }
+
+    private var deletingClipboard: Bool {
+        guard let deletingEntry else { return false }
+        if case .clipboard = deletingEntry { return true }
+        return false
+    }
+
+    private func deleteSelectedEntry() {
+        guard let entry = deletingEntry else { return }
+        deletingEntry = nil
+        switch entry {
+        case .library(let clip):
+            store.delete(clip)
+            model.rebuild(from: store.clips)
+        case .clipboard(let clipboard):
+            watcher.remove(clipboard)
+            model.rebuild(fromClipboard: watcher.entries)
         }
     }
 
@@ -1288,6 +1330,18 @@ private struct GalaxyView: View {
                         .buttonStyle(.glass)
                         .help("打开来源网页")
                     }
+
+                    Button(role: .destructive) {
+                        deletingEntry = entry
+                    } label: {
+                        Image(systemName: "trash")
+                            .frame(width: 20, height: 20)
+                    }
+                    .buttonStyle(.glass)
+                    .help(model.source == .clipboard ? "移除剪贴板记录" : "删除词库记录")
+                    .accessibilityLabel(
+                        model.source == .clipboard ? "移除剪贴板记录" : "删除词库记录"
+                    )
                 }
             }
         }
