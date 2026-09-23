@@ -54,6 +54,8 @@ final class ClipboardWatcher: ObservableObject {
     private let store: ClipStore
     private var timer: Timer?
     private var lastChangeCount: Int
+    /// 浏览器 URL 查询串行队列：慢查询自然排队，不堆积并发子进程
+    private let browserURLQueue = DispatchQueue(label: "local.voca.Voca.browser-url", qos: .utility)
 
     init(store: ClipStore) {
         self.store = store
@@ -96,7 +98,7 @@ final class ClipboardWatcher: ObservableObject {
 
         let app = NSWorkspace.shared.frontmostApplication
 
-        // 1) 文本：直接记录 + 持久化（不去重）；来自浏览器时顺带记录当前标签页 URL
+        // 1) 文本：直接记录 + 持久化（不去重）；来自浏览器时后台补填当前标签页 URL
         if let text = pasteboard.string(forType: .string)?
             .trimmingCharacters(in: .whitespacesAndNewlines), !text.isEmpty
         {
@@ -107,12 +109,13 @@ final class ClipboardWatcher: ObservableObject {
                 fileNames: nil,
                 appName: app?.localizedName,
                 appBundleID: app?.bundleIdentifier,
-                url: BrowserTabURL.current(bundleID: app?.bundleIdentifier),
+                url: nil,
                 date: Date()
             )
             entries.insert(entry, at: 0)
             trimIfNeeded()
             store.saveClipboardEntry(entry)
+            resolveBrowserURL(for: entry, bundleID: app?.bundleIdentifier)
             return
         }
 
@@ -156,6 +159,25 @@ final class ClipboardWatcher: ObservableObject {
     private func appendEphemeral(_ entry: ClipboardEntry) {
         entries.insert(entry, at: 0)
         trimIfNeeded()
+    }
+
+    /// 后台查询浏览器标签页 URL，完成后回主线程补填该条记录（内存 + 持久层）。
+    /// 条目在查询期间被删除时，补填静默跳过（UPDATE 命中 0 行）。
+    private func resolveBrowserURL(for entry: ClipboardEntry, bundleID: String?) {
+        guard BrowserTabURL.isSupportedBrowser(bundleID: bundleID) else { return }
+        let entryID = entry.id
+        browserURLQueue.async { [weak self] in
+            guard let url = BrowserTabURL.current(bundleID: bundleID) else { return }
+            Task { @MainActor in
+                self?.applyResolvedURL(url, to: entryID)
+            }
+        }
+    }
+
+    private func applyResolvedURL(_ url: String, to id: UUID) {
+        guard let index = entries.firstIndex(where: { $0.id == id }) else { return }
+        entries[index].url = url
+        store.updateClipboardEntryURL(id: id, url: url)
     }
 
     private func trimIfNeeded() {

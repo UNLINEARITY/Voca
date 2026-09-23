@@ -18,6 +18,7 @@
 
 import Foundation
 import GRDB
+import os
 
 /// 一条保存记录：选中文本 + 来源 App + 时间
 struct Clip: Codable, Identifiable, Equatable, FetchableRecord, MutablePersistableRecord {
@@ -36,9 +37,20 @@ struct Clip: Codable, Identifiable, Equatable, FetchableRecord, MutablePersistab
     var count: Int
     /// 最近一次保存时间（列表置顶排序键）
     var lastSeenAt: Date
+    /// text 的 FNV-1a 64 位哈希：合并查找的预筛键（命中后仍做全文比对，碰撞不影响正确性）
+    var textHash: Int64
 
     mutating func didInsert(_ inserted: InsertionSuccess) {
         id = inserted.rowID
+    }
+
+    /// FNV-1a 64-bit（UTF-8 字节流），用于 idx_clips_textHash 预筛
+    static func textHash(of text: String) -> Int64 {
+        var hash: UInt64 = 0xcbf29ce484222325
+        for byte in text.utf8 {
+            hash = (hash ^ UInt64(byte)) &* 0x0000_0100_0000_01b3
+        }
+        return Int64(bitPattern: hash)
     }
 }
 
@@ -58,7 +70,14 @@ final class ClipStore: ObservableObject {
     private let dbQueue: DatabaseQueue
     @Published private(set) var clips: [Clip] = []
 
-    /// 数据库位置：~/Library/Application Support/Voca/voca.sqlite（备份 = 拷贝这一个文件）
+    private static let logger = Logger(subsystem: "local.voca.Voca", category: "store")
+    /// 当前列表是否处于搜索过滤态(保存后的发布策略依赖它)
+    private var currentSearch = ""
+    /// 异步重载的代际计数:过期结果不得覆盖新结果
+    private var reloadGeneration = 0
+
+    /// 数据库位置：~/Library/Application Support/Voca/voca.sqlite
+    /// 备份 = 退出 Voca 后拷贝这一个文件（WAL 模式，运行中拷贝可能缺最近事务）
     static func defaultURL() -> URL {
         let dir = FileManager.default.urls(for: .applicationSupportDirectory, in: .userDomainMask)[0]
             .appendingPathComponent("Voca", isDirectory: true)
@@ -68,7 +87,11 @@ final class ClipStore: ObservableObject {
 
     init(url: URL? = nil) throws {
         let dbURL = url ?? Self.defaultURL()
-        dbQueue = try DatabaseQueue(path: dbURL.path)
+        var config = Configuration()
+        // WAL：写事务不长期独占库文件；配合 busy 超时，双实例并发写不再立即 SQLITE_BUSY
+        config.journalMode = .wal
+        config.busyMode = .timeout(5)
+        dbQueue = try DatabaseQueue(path: dbURL.path, configuration: config)
 
         var migrator = DatabaseMigrator()
         migrator.registerMigration("v1") { db in
@@ -125,28 +148,82 @@ final class ClipStore: ObservableObject {
             try db.execute(sql: "ALTER TABLE clip_events ADD COLUMN url TEXT")
             try db.execute(sql: "ALTER TABLE clipboard_entries ADD COLUMN url TEXT")
         }
+        migrator.registerMigration("v5") { db in
+            // 合并查找预筛键：textHash（可空列，回填后写入路径始终赋值）
+            try db.execute(sql: "ALTER TABLE clips ADD COLUMN textHash INTEGER")
+            let cursor = try Row.fetchCursor(db, sql: "SELECT id, text FROM clips")
+            while let row = try cursor.next() {
+                let id: Int64 = row["id"]
+                let text: String = row["text"]
+                try db.execute(
+                    sql: "UPDATE clips SET textHash = ? WHERE id = ?",
+                    arguments: [Clip.textHash(of: text), id]
+                )
+            }
+            try db.create(
+                index: "idx_clips_textHash",
+                on: Clip.databaseTableName,
+                columns: ["textHash"]
+            )
+            // reload/export 的实际排序键；同时移除从未被任何查询使用的 createdAt 索引
+            try db.create(
+                index: "idx_clips_lastSeenAt",
+                on: Clip.databaseTableName,
+                columns: ["lastSeenAt"]
+            )
+            try db.drop(index: "idx_clips_createdAt")
+        }
         try migrator.migrate(dbQueue)
-        reload()
+        clips = (try? loadClips(search: "")) ?? []
     }
 
     // MARK: - 查询
 
+    /// 同步重载（主线程调用）：列表立即一致，供编辑/删除等低频路径使用
     func reload(search: String = "") {
         let term = search.trimmingCharacters(in: .whitespacesAndNewlines)
+        currentSearch = term
+        reloadGeneration += 1
         do {
-            clips = try dbQueue.read { db -> [Clip] in
-                if term.isEmpty {
-                    return try Clip.order(Column("lastSeenAt").desc).limit(2000).fetchAll(db)
-                }
-                let pattern = Self.likePattern(term)
-                return try Clip
-                    .filter(sql: "text LIKE ? ESCAPE '\\'", arguments: [pattern])
-                    .order(Column("lastSeenAt").desc)
-                    .limit(2000)
-                    .fetchAll(db)
-            }
+            clips = try loadClips(search: term)
         } catch {
-            NSLog("Voca reload error: %@", "\(error)")
+            Self.logger.error("词库重载失败: \(error, privacy: .public)")
+        }
+    }
+
+    /// 异步重载（主线程调用）：查询在后台执行，完成后回主线程发布；
+    /// 与后续 reload/reloadAsync 竞争时以 generation 丢弃过期结果。
+    /// 供搜索击键等高频路径使用，避免主线程同步扫描。
+    func reloadAsync(search: String) {
+        let term = search.trimmingCharacters(in: .whitespacesAndNewlines)
+        currentSearch = term
+        reloadGeneration += 1
+        let generation = reloadGeneration
+        DispatchQueue.global(qos: .userInitiated).async { [weak self] in
+            guard let self else { return }
+            do {
+                let fetched = try self.loadClips(search: term)
+                DispatchQueue.main.async { [weak self] in
+                    guard let self, self.reloadGeneration == generation else { return }
+                    self.clips = fetched
+                }
+            } catch {
+                Self.logger.error("词库搜索重载失败: \(error, privacy: .public)")
+            }
+        }
+    }
+
+    private func loadClips(search term: String) throws -> [Clip] {
+        try dbQueue.read { db -> [Clip] in
+            if term.isEmpty {
+                return try Clip.order(Column("lastSeenAt").desc).limit(2000).fetchAll(db)
+            }
+            let pattern = Self.likePattern(term)
+            return try Clip
+                .filter(sql: "text LIKE ? ESCAPE '\\'", arguments: [pattern])
+                .order(Column("lastSeenAt").desc)
+                .limit(2000)
+                .fetchAll(db)
         }
     }
 
@@ -163,9 +240,14 @@ final class ClipStore: ObservableObject {
         date: Date = Date()
     ) throws -> Clip {
         let words = text.components(separatedBy: .whitespacesAndNewlines).filter { !$0.isEmpty }
+        let hash = Clip.textHash(of: text)
         var result: Clip?
         try dbQueue.write { db in
-            if var existing = try Clip.filter(Column("text") == text).fetchOne(db) {
+            if var existing = try Clip
+                .filter(Column("textHash") == hash)
+                .filter(Column("text") == text)
+                .fetchOne(db)
+            {
                 existing.count += 1
                 existing.lastSeenAt = date
                 if let url { existing.url = url }
@@ -193,7 +275,8 @@ final class ClipStore: ObservableObject {
                     createdAt: date,
                     url: url,
                     count: 1,
-                    lastSeenAt: date
+                    lastSeenAt: date,
+                    textHash: hash
                 )
                 try clip.insert(db)
                 if let clipId = clip.id {
@@ -210,11 +293,30 @@ final class ClipStore: ObservableObject {
                 result = clip
             }
         }
-        reload()
         guard let saved = result else {
             throw DatabaseError(resultCode: .SQLITE_ERROR, message: "Voca: 保存失败")
         }
+        publishSaved(saved)
         return saved
+    }
+
+    /// 保存后的列表发布：高频路径做内存增量（避免每次保存全量重拉 2000 条），
+    /// 与 reload 的排序语义一致（最近保存置顶）；搜索过滤激活时退回全量重载保持过滤正确性
+    private func publishSaved(_ clip: Clip) {
+        if !currentSearch.isEmpty {
+            reload(search: currentSearch)
+            return
+        }
+        if let id = clip.id, let index = clips.firstIndex(where: { $0.id == id }) {
+            clips[index] = clip
+            let moved = clips.remove(at: index)
+            clips.insert(moved, at: 0)
+        } else {
+            clips.insert(clip, at: 0)
+            if clips.count > 2000 {
+                clips.removeLast(clips.count - 2000)
+            }
+        }
     }
 
     /// 某条记录的时间线（每次出现的时间与来源，倒序）
@@ -248,37 +350,73 @@ final class ClipStore: ObservableObject {
     }
 
     func delete(_ clip: Clip) {
-        try? dbQueue.write { db in
-            if let clipId = clip.id {
-                try db.execute(
-                    sql: "DELETE FROM clip_events WHERE clipId = ?",
-                    arguments: [clipId]
-                )
+        do {
+            try dbQueue.write { db in
+                if let clipId = clip.id {
+                    try db.execute(
+                        sql: "DELETE FROM clip_events WHERE clipId = ?",
+                        arguments: [clipId]
+                    )
+                }
+                _ = try clip.delete(db)
             }
-            _ = try clip.delete(db)
+        } catch {
+            Self.logger.error("删除词条失败: \(error, privacy: .public)")
         }
-        reload()
+        reload(search: currentSearch)
     }
 
-    /// 编辑已有记录的文本与备注（重算词数，保留来源与创建时间）
+    /// 编辑已有记录的文本与备注（重算词数，保留来源与创建时间）。
+    /// 若新文本与其他记录相同则合并：计数相加、时间线事件转移至既有行、
+    /// url/note 取非空优先、lastSeenAt 取较新值，随后删除被编辑的原行。
     func update(_ clip: Clip, text: String, note: String?) {
         var updated = clip
         updated.text = text
         updated.note = note
         updated.wordCount = text.components(separatedBy: .whitespacesAndNewlines)
             .filter { !$0.isEmpty }.count
-        try? dbQueue.write { db in
-            try updated.update(db)
+        updated.textHash = Clip.textHash(of: text)
+        do {
+            try dbQueue.write { db in
+                var conflictQuery = Clip
+                    .filter(Column("textHash") == updated.textHash)
+                    .filter(Column("text") == text)
+                if let oldId = clip.id {
+                    conflictQuery = conflictQuery.filter(Column("id") != oldId)
+                }
+                if var other = try conflictQuery.fetchOne(db) {
+                    other.count += updated.count
+                    if other.url == nil { other.url = updated.url }
+                    if (other.note ?? "").isEmpty { other.note = updated.note }
+                    other.lastSeenAt = max(other.lastSeenAt, updated.lastSeenAt)
+                    try other.update(db)
+                    if let otherId = other.id, let oldId = clip.id {
+                        try db.execute(
+                            sql: "UPDATE clip_events SET clipId = ? WHERE clipId = ?",
+                            arguments: [otherId, oldId]
+                        )
+                    }
+                    _ = try updated.delete(db)
+                } else {
+                    try updated.update(db)
+                }
+            }
+        } catch {
+            Self.logger.error("编辑词条失败: \(error, privacy: .public)")
         }
-        reload()
+        reload(search: currentSearch)
     }
 
     func deleteAll() {
-        try? dbQueue.write { db in
-            try db.execute(sql: "DELETE FROM clip_events")
-            _ = try Clip.deleteAll(db)
+        do {
+            try dbQueue.write { db in
+                try db.execute(sql: "DELETE FROM clip_events")
+                _ = try Clip.deleteAll(db)
+            }
+        } catch {
+            Self.logger.error("清空词库失败: \(error, privacy: .public)")
         }
-        reload()
+        reload(search: currentSearch)
     }
 
     // MARK: - 剪贴板历史持久化（仅文本条目）
@@ -316,29 +454,55 @@ final class ClipStore: ObservableObject {
     /// 直接插入新条目（不去重），并维持最多 200 条
     func saveClipboardEntry(_ entry: ClipboardEntry) {
         guard let text = entry.text else { return }
-        try? dbQueue.write { db in
-            try db.execute(
-                sql: "INSERT INTO clipboard_entries (id, text, appName, appBundleID, url, date) VALUES (?, ?, ?, ?, ?, ?)",
-                arguments: [entry.id.uuidString, text, entry.appName, entry.appBundleID, entry.url, entry.date]
-            )
-            try db.execute(
-                sql: "DELETE FROM clipboard_entries WHERE id NOT IN (SELECT id FROM clipboard_entries ORDER BY date DESC LIMIT 200)"
-            )
+        do {
+            try dbQueue.write { db in
+                try db.execute(
+                    sql: "INSERT INTO clipboard_entries (id, text, appName, appBundleID, url, date) VALUES (?, ?, ?, ?, ?, ?)",
+                    arguments: [entry.id.uuidString, text, entry.appName, entry.appBundleID, entry.url, entry.date]
+                )
+                try db.execute(
+                    sql: "DELETE FROM clipboard_entries WHERE id NOT IN (SELECT id FROM clipboard_entries ORDER BY date DESC LIMIT 200)"
+                )
+            }
+        } catch {
+            Self.logger.error("剪贴板历史写入失败: \(error, privacy: .public)")
+        }
+    }
+
+    /// URL 异步查询完成后补填既有剪贴板记录
+    func updateClipboardEntryURL(id: UUID, url: String) {
+        do {
+            try dbQueue.write { db in
+                try db.execute(
+                    sql: "UPDATE clipboard_entries SET url = ? WHERE id = ?",
+                    arguments: [url, id.uuidString]
+                )
+            }
+        } catch {
+            Self.logger.error("剪贴板 URL 补填失败: \(error, privacy: .public)")
         }
     }
 
     func deleteClipboardEntry(id: UUID) {
-        try? dbQueue.write { db in
-            try db.execute(
-                sql: "DELETE FROM clipboard_entries WHERE id = ?",
-                arguments: [id.uuidString]
-            )
+        do {
+            try dbQueue.write { db in
+                try db.execute(
+                    sql: "DELETE FROM clipboard_entries WHERE id = ?",
+                    arguments: [id.uuidString]
+                )
+            }
+        } catch {
+            Self.logger.error("移除剪贴板记录失败: \(error, privacy: .public)")
         }
     }
 
     func clearClipboardEntries() {
-        try? dbQueue.write { db in
-            try db.execute(sql: "DELETE FROM clipboard_entries")
+        do {
+            try dbQueue.write { db in
+                try db.execute(sql: "DELETE FROM clipboard_entries")
+            }
+        } catch {
+            Self.logger.error("清空剪贴板历史失败: \(error, privacy: .public)")
         }
     }
 

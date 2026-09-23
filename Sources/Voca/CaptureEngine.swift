@@ -45,7 +45,8 @@ enum BrowserTabURL {
         return targets[bundleID] != nil
     }
 
-    /// 返回当前标签页 URL；非受支持浏览器、无窗口、未授权或非 http(s) 链接时返回 nil
+    /// 返回当前标签页 URL；非受支持浏览器、无窗口、未授权或非 http(s) 链接时返回 nil。
+    /// 经 osascript 子进程执行，可在任意线程调用；浏览器忙时只阻塞调用线程，不卡 UI。
     static func current(bundleID: String?) -> String? {
         guard let bundleID, let name = targets[bundleID] else { return nil }
         let isChromium = name != "Safari"
@@ -56,15 +57,32 @@ enum BrowserTabURL {
             end if
         end tell
         """
-        guard let script = NSAppleScript(source: source) else { return nil }
-        var errorInfo: NSDictionary?
-        let output = script.executeAndReturnError(&errorInfo)
-        if let errorInfo {
-            NSLog("Voca: AppleScript 查询 %@ 失败：%@", name, errorInfo)
+        guard let output = runAppleScript(source) else { return nil }
+        let value = output.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard value.hasPrefix("http") else { return nil }
+        return value
+    }
+
+    /// 子进程执行 AppleScript；失败（无窗口、未授权等）属常规降级，静默返回 nil
+    private static func runAppleScript(_ source: String) -> String? {
+        let process = Process()
+        process.executableURL = URL(fileURLWithPath: "/usr/bin/osascript")
+        process.arguments = ["-e", source]
+        let stdout = Pipe()
+        let stderrPipe = Pipe()
+        process.standardOutput = stdout
+        process.standardError = stderrPipe
+        do {
+            try process.run()
+        } catch {
+            NSLog("Voca: osascript 启动失败：%@", "\(error)")
             return nil
         }
-        guard let value = output.stringValue, value.hasPrefix("http") else { return nil }
-        return value
+        let data = stdout.fileHandleForReading.readDataToEndOfFile()
+        _ = stderrPipe.fileHandleForReading.readDataToEndOfFile()
+        process.waitUntilExit()
+        guard process.terminationStatus == 0 else { return nil }
+        return String(data: data, encoding: .utf8)
     }
 }
 
@@ -95,10 +113,8 @@ final class CaptureEngine {
         let frontApp = NSWorkspace.shared.frontmostApplication
         let appName = frontApp?.localizedName
         let bundleID = frontApp?.bundleIdentifier
-        // 前台是受支持浏览器时查询当前标签页 URL（NSAppleScript 须在主线程执行）
-        let url = DispatchQueue.main.sync {
-            BrowserTabURL.current(bundleID: bundleID)
-        }
+        // 前台是受支持浏览器时查询当前标签页 URL（子进程执行，无需主线程）
+        let url = BrowserTabURL.current(bundleID: bundleID)
 
         if focusedElementIsSecure() { return .secureField }
 

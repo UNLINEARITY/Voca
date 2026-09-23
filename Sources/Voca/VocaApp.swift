@@ -214,6 +214,7 @@ struct MenuBarView: View {
 struct RecordsView: View {
     @EnvironmentObject private var store: ClipStore
     @State private var search = ""
+    @State private var searchReloadTask: Task<Void, Never>?
     @State private var editingClip: Clip?
     @State private var timelineClip: Clip?
     @State private var deletingClip: Clip?
@@ -246,7 +247,13 @@ struct RecordsView: View {
             .navigationTitle("Voca 记录")
             .searchable(text: $search, placement: .toolbar, prompt: "搜索全文")
             .onChange(of: search) { _, newValue in
-                store.reload(search: newValue)
+                // 防抖 200ms：连续古键只触发一次后台查询，不卡输入
+                searchReloadTask?.cancel()
+                searchReloadTask = Task {
+                    try? await Task.sleep(nanoseconds: 200_000_000)
+                    guard !Task.isCancelled else { return }
+                    store.reloadAsync(search: newValue)
+                }
             }
             .toolbar {
                 ToolbarItem(placement: .primaryAction) {
@@ -272,7 +279,6 @@ struct RecordsView: View {
             .sheet(item: $editingClip) { clip in
                 EditClipSheet(clip: clip) { text, note in
                     store.update(clip, text: text, note: note)
-                    store.reload(search: search)
                 }
             }
             .sheet(item: $timelineClip) { clip in
