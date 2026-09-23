@@ -166,6 +166,18 @@ final class ClipboardWatcher: ObservableObject {
 
     // MARK: - 操作
 
+    /// 将文本历史收入词库，原剪贴板记录保持独立。
+    func promote(_ entry: ClipboardEntry) throws -> Clip? {
+        guard let text = entry.text else { return nil }
+        return try store.save(
+            text: text,
+            appName: entry.appName,
+            bundleID: entry.appBundleID,
+            url: entry.url,
+            date: entry.date
+        )
+    }
+
     func remove(_ entry: ClipboardEntry) {
         entries.removeAll { $0.id == entry.id }
         store.deleteClipboardEntry(id: entry.id)
@@ -204,7 +216,6 @@ final class ClipboardWatcher: ObservableObject {
 
 struct ClipboardHistoryView: View {
     @EnvironmentObject private var watcher: ClipboardWatcher
-    @EnvironmentObject private var store: ClipStore
     @State private var promotedIDs: Set<UUID> = []
     @State private var expandedIDs: Set<UUID> = []
     @State private var deletingEntry: ClipboardEntry?
@@ -368,16 +379,9 @@ struct ClipboardHistoryView: View {
     }
 
     private func save(_ entry: ClipboardEntry) {
-        guard let text = entry.text else { return }
         do {
             // 入库时间 = 复制时间；同文本合并计数；入库后保留剪贴板记录
-            let clip = try store.save(
-                text: text,
-                appName: entry.appName,
-                bundleID: entry.appBundleID,
-                url: entry.url,
-                date: entry.date
-            )
+            guard let clip = try watcher.promote(entry) else { return }
             ToastController.shared.show(clip.count > 1 ? "已入库（第 \(clip.count) 次）" : "已加入词库")
             promotedIDs.insert(entry.id)
         } catch {

@@ -67,11 +67,42 @@ final class GalaxyTuning: ObservableObject {
 
 // MARK: - 球面数据
 
+enum GalaxySource: String, CaseIterable {
+    case library
+    case clipboard
+}
+
+enum GalaxyEntry {
+    case library(Clip)
+    case clipboard(ClipboardEntry)
+
+    var text: String {
+        switch self {
+        case .library(let clip): clip.text
+        case .clipboard(let entry): entry.text ?? ""
+        }
+    }
+
+    var appName: String? {
+        switch self {
+        case .library(let clip): clip.appName
+        case .clipboard(let entry): entry.appName
+        }
+    }
+
+    var url: String? {
+        switch self {
+        case .library(let clip): clip.url
+        case .clipboard(let entry): entry.url
+        }
+    }
+}
+
 struct GalaxyItem {
     let clipId: Int64
     let text: String
     let fontSize: CGFloat
-    let clip: Clip
+    let entry: GalaxyEntry
     let position: SIMD3<Float>
 }
 
@@ -80,7 +111,8 @@ final class GalaxyModel: ObservableObject {
     static let maxItems = 400
 
     @Published private(set) var items: [GalaxyItem] = []
-    @Published var selectedClip: Clip?
+    @Published var selectedItem: GalaxyItem?
+    @Published var source: GalaxySource = .library
     @Published var isTimelineVisible = false
     @Published var timelinePage = 0
     var timelinePageCount = 1
@@ -107,23 +139,47 @@ final class GalaxyModel: ObservableObject {
             sampled = clips
         }
 
-        let count = sampled.count
-        guard count > 0 else {
-            items = []
-            selectedClip = nil
-            return
-        }
+        makeItems(from: sampled.map(GalaxyEntry.library))
+        selectedItem = nil
+        isTimelineVisible = false
+        timelinePage = 0
+    }
 
+    func rebuild(fromClipboard entries: [ClipboardEntry]) {
+        let selectedID: UUID?
+        if case .clipboard(let selected)? = selectedItem?.entry {
+            selectedID = selected.id
+        } else {
+            selectedID = nil
+        }
+        makeItems(from: entries.compactMap { entry in
+            entry.text == nil ? nil : GalaxyEntry.clipboard(entry)
+        })
+        selectedItem = items.first { item in
+            if case .clipboard(let entry) = item.entry { return entry.id == selectedID }
+            return false
+        }
+        isTimelineVisible = false
+        timelinePage = 0
+    }
+
+    private func makeItems(from entries: [GalaxyEntry]) {
+        let count = entries.count
         let goldenAngle = Float.pi * (3.0 - sqrt(5.0))
-        items = sampled.enumerated().map { index, clip in
+        items = entries.enumerated().map { index, entry in
             let y = 1.0 - 2.0 * (Float(index) + 0.5) / Float(count)
             let horizontalRadius = sqrt(max(0, 1 - y * y))
             let theta = goldenAngle * Float(index)
+            let id: Int64
+            switch entry {
+            case .library(let clip): id = clip.id ?? 0
+            case .clipboard: id = -Int64(index + 1)
+            }
             return GalaxyItem(
-                clipId: clip.id ?? 0,
-                text: Self.displayText(clip.text),
+                clipId: id,
+                text: Self.displayText(entry.text),
                 fontSize: 25,
-                clip: clip,
+                entry: entry,
                 position: SIMD3(
                     horizontalRadius * cos(theta),
                     y,
@@ -131,9 +187,6 @@ final class GalaxyModel: ObservableObject {
                 )
             )
         }
-        selectedClip = nil
-        isTimelineVisible = false
-        timelinePage = 0
     }
 
     func turnTimelinePage(with event: NSEvent) {
@@ -191,6 +244,7 @@ final class GalaxyWindowController {
     }
 
     func open() {
+        model.source = .library
         model.rebuild(from: AppModel.shared.store.clips)
         let screenFrame = NSScreen.main?.visibleFrame
             ?? NSRect(x: 0, y: 0, width: 1200, height: 800)
@@ -228,7 +282,7 @@ final class GalaxyWindowController {
         removeEventMonitor()
         guard let window else { return }
         setGalaxyRendering(paused: true, in: window.contentView)
-        model.selectedClip = nil
+        model.selectedItem = nil
         window.orderOut(nil)
     }
 
@@ -243,8 +297,8 @@ final class GalaxyWindowController {
                 return nil
             }
             guard event.type == .keyDown, event.keyCode == 53 else { return event }
-            if self.model.selectedClip != nil {
-                self.model.selectedClip = nil
+            if self.model.selectedItem != nil {
+                self.model.selectedItem = nil
             } else {
                 DispatchQueue.main.async {
                     GalaxyWindowController.shared.close()
@@ -288,6 +342,7 @@ private struct GalaxyView: View {
     @EnvironmentObject private var watcher: ClipboardWatcher
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
     @State private var editingClip: Clip?
+    @State private var promotedIDs: Set<UUID> = []
     @State private var timelineEvents: [ClipEvent] = []
     @State private var selectedTimelineIndex = 0
     @State private var showTuning = false
@@ -303,16 +358,7 @@ private struct GalaxyView: View {
                 VStack {
                     topBar
                     Spacer()
-                    if let clip = model.selectedClip {
-                        if !model.isTimelineVisible,
-                           let note = clip.note,
-                           !note.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
-                            noteBelowSphere(note, availableWidth: geometry.size.width)
-                        }
-                        selectionActions(clip)
-                    } else {
-                        hintBar
-                    }
+                    selectionDetail(availableWidth: geometry.size.width)
                 }
                 .padding(20)
 
@@ -327,27 +373,44 @@ private struct GalaxyView: View {
                         .padding(.top, 70)
                 }
 
-                if let clip = model.selectedClip {
+                if let item = model.selectedItem {
                     selectionOrbit(
-                        clip,
+                        item.entry,
                         sphereDiameter: radius * 2,
                         canvasSize: geometry.size
                     )
                     .transition(selectionTransition)
                 }
             }
-            .animation(selectionAnimation, value: model.selectedClip?.id)
+            .animation(selectionAnimation, value: model.selectedItem?.clipId)
             .animation(selectionAnimation, value: model.isTimelineVisible)
             .animation(selectionAnimation, value: model.timelinePage)
         }
         .background(.clear)
-        .onChange(of: model.selectedClip) { _, clip in
-            timelineEvents = clip.map { store.events(for: $0) } ?? []
+        .onChange(of: model.source) { _, source in
+            model.selectedItem = nil
+            if source == .library {
+                model.rebuild(from: store.clips)
+            } else {
+                model.rebuild(fromClipboard: watcher.entries)
+            }
+        }
+        .onChange(of: watcher.entries) { _, entries in
+            if model.source == .clipboard {
+                model.rebuild(fromClipboard: entries)
+            }
+        }
+        .onChange(of: model.selectedItem?.clipId) { _, _ in
+            if let item = model.selectedItem, case .library(let clip) = item.entry {
+                timelineEvents = store.events(for: clip)
+            } else {
+                timelineEvents = []
+            }
             model.timelinePageCount = max(1, (timelineEvents.count + 5) / 6)
             model.isTimelineVisible = false
             model.timelinePage = 0
             selectedTimelineIndex = 0
-            if clip != nil {
+            if model.selectedItem != nil {
                 showTuning = false
             }
         }
@@ -359,7 +422,7 @@ private struct GalaxyView: View {
                 store.update(clip, text: text, note: note)
                 model.rebuild(from: store.clips)
                 if let id = clip.id {
-                    model.selectedClip = store.clips.first { $0.id == id }
+                    model.selectedItem = model.items.first { $0.clipId == id }
                 }
             }
         }
@@ -427,9 +490,13 @@ private struct GalaxyView: View {
             Group {
                 if model.items.isEmpty {
                     ContentUnavailableView(
-                        "星图还是空的",
+                        model.source == .library ? "星图还是空的" : "暂无剪贴板文字",
                         systemImage: "sparkles",
-                        description: Text("保存一些文字后，它们会出现在这里。")
+                        description: Text(
+                            model.source == .library
+                                ? "保存一些文字后，它们会出现在这里。"
+                                : "复制文字后，它会出现在这里；图片和文件仍可在剪贴板历史中查看。"
+                        )
                     )
                     .frame(maxWidth: diameter * 0.56)
                 } else {
@@ -461,6 +528,14 @@ private struct GalaxyView: View {
 
                 Spacer()
 
+                Picker("星图内容", selection: $model.source) {
+                    Text("词库").tag(GalaxySource.library)
+                    Text("剪贴板").tag(GalaxySource.clipboard)
+                }
+                .pickerStyle(.segmented)
+                .frame(width: 190)
+                .help("切换星图内容")
+
                 Button {
                     showTuning.toggle()
                 } label: {
@@ -482,6 +557,27 @@ private struct GalaxyView: View {
         }
     }
 
+    @ViewBuilder
+    private func selectionDetail(availableWidth: CGFloat) -> some View {
+        if let item = model.selectedItem {
+            switch item.entry {
+            case .library(let clip):
+                if !model.isTimelineVisible,
+                   let note = clip.note,
+                   !note.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+                    noteBelowSphere(note, availableWidth: availableWidth)
+                }
+            case .clipboard(let entry):
+                if let text = entry.text {
+                    noteBelowSphere(text, availableWidth: availableWidth, label: "剪贴板全文")
+                }
+            }
+            selectionActions(item.entry)
+        } else {
+            hintBar
+        }
+    }
+
     private var hintBar: some View {
         Text("拖拽或双指滑动旋转 · 滚轮/捏合/调参调整字号 · 点击词条展开轨道 · ESC 退出")
             .font(.caption)
@@ -491,7 +587,11 @@ private struct GalaxyView: View {
             .glassEffect(.regular, in: Capsule())
     }
 
-    private func noteBelowSphere(_ note: String, availableWidth: CGFloat) -> some View {
+    private func noteBelowSphere(
+        _ note: String,
+        availableWidth: CGFloat,
+        label: String = "注释"
+    ) -> some View {
         let width = min(560, max(220, availableWidth - 48))
         let textHeight = (note as NSString).boundingRect(
             with: CGSize(width: width - 36, height: .greatestFiniteMagnitude),
@@ -515,7 +615,7 @@ private struct GalaxyView: View {
             in: RoundedRectangle(cornerRadius: 16, style: .continuous)
         )
         .padding(.bottom, 12)
-        .accessibilityLabel("注释")
+        .accessibilityLabel(label)
     }
 
     // MARK: 实时调参面板
@@ -622,7 +722,7 @@ private struct GalaxyView: View {
     }
 
     private func selectionOrbit(
-        _ clip: Clip,
+        _ entry: GalaxyEntry,
         sphereDiameter: CGFloat,
         canvasSize: CGSize
     ) -> some View {
@@ -636,7 +736,7 @@ private struct GalaxyView: View {
         let verticalOffset = min(190, orbitRadius * 0.48)
 
         return ZStack {
-            if model.isTimelineVisible {
+            if model.isTimelineVisible, case .library = entry {
                 timelineOrbit(
                     canvasSize: canvasSize,
                     radius: orbitRadius,
@@ -646,7 +746,7 @@ private struct GalaxyView: View {
                 .transition(.opacity)
             } else {
                 attributeOrbit(
-                    clip,
+                    entry,
                     canvasSize: canvasSize,
                     radius: orbitRadius,
                     sideWidth: sideWidth,
@@ -657,11 +757,14 @@ private struct GalaxyView: View {
         }
         .frame(width: canvasSize.width, height: canvasSize.height)
         .accessibilityElement(children: .contain)
-        .accessibilityLabel(model.isTimelineVisible ? "词条时间线" : "词条属性")
+        .accessibilityLabel(
+            model.source == .clipboard ? "剪贴板属性"
+                : model.isTimelineVisible ? "词条时间线" : "词条属性"
+        )
     }
 
     private func attributeOrbit(
-        _ clip: Clip,
+        _ entry: GalaxyEntry,
         canvasSize: CGSize,
         radius: CGFloat,
         sideWidth: CGFloat,
@@ -670,7 +773,7 @@ private struct GalaxyView: View {
         let center = CGPoint(x: canvasSize.width / 2, y: canvasSize.height / 2)
         let leftX = center.x - radius - Self.orbitLabelGap - sideWidth / 2
         let rightX = center.x + radius + Self.orbitLabelGap + sideWidth / 2
-        let sourceURL = clip.url.flatMap(URL.init(string:))
+        let sourceURL = entry.url.flatMap(URL.init(string:))
         let sourceName = sourceURL?.host ?? "无网页来源"
 
         return ZStack {
@@ -682,7 +785,7 @@ private struct GalaxyView: View {
 
             orbitAttribute(
                 title: "来源应用",
-                value: clip.appName ?? "未知来源",
+                value: entry.appName ?? "未知来源",
                 systemImage: "app.dashed",
                 side: .left
             )
@@ -710,29 +813,51 @@ private struct GalaxyView: View {
                 .position(x: leftX, y: center.y + verticalOffset)
             }
 
-            orbitAttribute(
-                title: "保存次数",
-                value: "\(clip.count) 次",
-                systemImage: "square.stack.3d.up",
-                side: .right
-            )
-            .frame(width: sideWidth)
-            .position(x: rightX, y: center.y - verticalOffset)
+            switch entry {
+            case .library(let clip):
+                orbitAttribute(
+                    title: "保存次数",
+                    value: "\(clip.count) 次",
+                    systemImage: "square.stack.3d.up",
+                    side: .right
+                )
+                .frame(width: sideWidth)
+                .position(x: rightX, y: center.y - verticalOffset)
 
-            orbitAttribute(
-                title: "时间线",
-                value: timelineEvents.isEmpty ? "无记录" : "\(timelineEvents.count) 次记录",
-                systemImage: "clock.arrow.trianglehead.counterclockwise.rotate.90",
-                side: .right,
-                action: timelineEvents.isEmpty ? nil : {
-                    withAnimation(selectionAnimation) {
-                        selectedTimelineIndex = 0
-                        model.isTimelineVisible = true
+                orbitAttribute(
+                    title: "时间线",
+                    value: timelineEvents.isEmpty ? "无记录" : "\(timelineEvents.count) 次记录",
+                    systemImage: "clock.arrow.trianglehead.counterclockwise.rotate.90",
+                    side: .right,
+                    action: timelineEvents.isEmpty ? nil : {
+                        withAnimation(selectionAnimation) {
+                            selectedTimelineIndex = 0
+                            model.isTimelineVisible = true
+                        }
                     }
-                }
-            )
-            .frame(width: sideWidth)
-            .position(x: rightX, y: center.y + verticalOffset)
+                )
+                .frame(width: sideWidth)
+                .position(x: rightX, y: center.y + verticalOffset)
+            case .clipboard(let clipboard):
+                orbitAttribute(
+                    title: "复制时间",
+                    value: clipboard.date.formatted(date: .abbreviated, time: .shortened),
+                    systemImage: "clock",
+                    side: .right,
+                    lineLimit: 2
+                )
+                .frame(width: sideWidth)
+                .position(x: rightX, y: center.y - verticalOffset)
+
+                orbitAttribute(
+                    title: "文本长度",
+                    value: "\(clipboard.text?.count ?? 0) 字符",
+                    systemImage: "textformat",
+                    side: .right
+                )
+                .frame(width: sideWidth)
+                .position(x: rightX, y: center.y + verticalOffset)
+            }
         }
     }
 
@@ -936,10 +1061,10 @@ private struct GalaxyView: View {
         .accessibilityValue(value)
     }
 
-    private func selectionActions(_ clip: Clip) -> some View {
+    private func selectionActions(_ entry: GalaxyEntry) -> some View {
         GlassEffectContainer(spacing: 10) {
             HStack(spacing: 10) {
-                if model.isTimelineVisible {
+                if model.isTimelineVisible, case .library = entry {
                     Button {
                         withAnimation(selectionAnimation) {
                             model.isTimelineVisible = false
@@ -992,24 +1117,38 @@ private struct GalaxyView: View {
                     }
                 } else {
                     Button {
-                        watcher.copyText(clip.text)
+                        watcher.copyText(entry.text)
                     } label: {
                         Image(systemName: "document.on.document")
                             .frame(width: 20, height: 20)
                     }
                     .buttonStyle(.glassProminent)
-                    .help("复制词条")
+                    .help(model.source == .clipboard ? "复制文字" : "复制词条")
 
-                    Button {
-                        editingClip = clip
-                    } label: {
-                        Image(systemName: "pencil")
-                            .frame(width: 20, height: 20)
+                    switch entry {
+                    case .library(let clip):
+                        Button {
+                            editingClip = clip
+                        } label: {
+                            Image(systemName: "pencil")
+                                .frame(width: 20, height: 20)
+                        }
+                        .buttonStyle(.glass)
+                        .help("编辑词条")
+                    case .clipboard(let clipboard):
+                        Button {
+                            promote(clipboard)
+                        } label: {
+                            Image(systemName: promotedIDs.contains(clipboard.id)
+                                ? "checkmark.circle.fill" : "plus.circle.fill")
+                                .frame(width: 20, height: 20)
+                        }
+                        .buttonStyle(.glass)
+                        .disabled(promotedIDs.contains(clipboard.id))
+                        .help(promotedIDs.contains(clipboard.id) ? "已加入词库" : "加入词库")
                     }
-                    .buttonStyle(.glass)
-                    .help("编辑词条")
 
-                    if let urlString = clip.url, let url = URL(string: urlString) {
+                    if let urlString = entry.url, let url = URL(string: urlString) {
                         Button {
                             NSWorkspace.shared.open(url)
                         } label: {
@@ -1023,7 +1162,20 @@ private struct GalaxyView: View {
             }
         }
         .accessibilityElement(children: .contain)
-        .accessibilityLabel(model.isTimelineVisible ? "时间线操作" : "词条操作")
+        .accessibilityLabel(
+            model.source == .clipboard ? "剪贴板操作"
+                : model.isTimelineVisible ? "时间线操作" : "词条操作"
+        )
+    }
+
+    private func promote(_ entry: ClipboardEntry) {
+        do {
+            guard let clip = try watcher.promote(entry) else { return }
+            promotedIDs.insert(entry.id)
+            ToastController.shared.show(clip.count > 1 ? "已入库（第 \(clip.count) 次）" : "已加入词库")
+        } catch {
+            ToastController.shared.show("入库失败：\(error.localizedDescription)")
+        }
     }
 
     private func timelineSource(for event: ClipEvent) -> String {

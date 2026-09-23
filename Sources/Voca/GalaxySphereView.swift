@@ -35,7 +35,7 @@ struct GalaxySphereView: NSViewRepresentable {
         context.coordinator.update(
             items: model.items,
             fontScale: model.fontScale,
-            selectedID: model.selectedClip?.id,
+            selectedID: model.selectedItem?.clipId,
             reverseRotation: reverseRotation
         )
         return view
@@ -45,7 +45,7 @@ struct GalaxySphereView: NSViewRepresentable {
         context.coordinator.update(
             items: model.items,
             fontScale: model.fontScale,
-            selectedID: model.selectedClip?.id,
+            selectedID: model.selectedItem?.clipId,
             reverseRotation: reverseRotation
         )
     }
@@ -305,8 +305,8 @@ final class GalaxySceneCoordinator: NSObject {
         let clipID = view.hitTest(point, options: options).lazy.compactMap { result in
             self.clipID(from: result.node)
         }.first
-        model?.selectedClip = clipID.flatMap { id in
-            latestItems.first { $0.clipId == id }?.clip
+        model?.selectedItem = clipID.flatMap { id in
+            latestItems.first { $0.clipId == id }
         }
     }
 
