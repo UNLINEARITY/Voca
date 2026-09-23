@@ -157,6 +157,8 @@ final class GalaxyModel: ObservableObject {
     /// 双击词条发出的编辑请求(GalaxyView 监听后弹出编辑面板;剪贴板条目无编辑界面,忽略)
     @Published var pendingEdit: GalaxyItem?
     @Published var source: GalaxySource = .library
+    /// 源切换动效方向(true=向前/右滑语义);由快捷键或顶栏切换设置,渲染层消费后置 nil
+    @Published var pendingSourceSwitch: Bool?
     @Published var isTimelineVisible = false
     @Published var timelinePage = 0
     var timelinePageCount = 1
@@ -542,6 +544,15 @@ private struct GalaxyView: View {
 
     private func handleSourceChange(_ source: GalaxySource) {
         model.selectedItem = nil
+        // 顶栏切换无方向语义,按目标位置推导:词库在左、剪贴板在右;
+        // 快捷键路径已携带方向,不覆盖
+        if model.pendingSourceSwitch == nil {
+            model.pendingSourceSwitch = (source == .clipboard)
+        }
+        // 无障碍:减弱动态效果时不播旋转动效,直接重建
+        if reduceMotion {
+            model.pendingSourceSwitch = nil
+        }
         if source == .library {
             model.rebuild(from: store.clips)
         } else {

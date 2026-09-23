@@ -102,6 +102,17 @@ final class GalaxySceneView: SCNView {
             interactionCoordinator?.editSelection()
             return
         }
+        // Shift+Option+←/→ → 词库球与剪贴板球切换
+        if event.modifierFlags.contains(.shift) && event.modifierFlags.contains(.option) {
+            if event.keyCode == kVK_RightArrow {
+                interactionCoordinator?.switchSource(forward: true)
+                return
+            }
+            if event.keyCode == kVK_LeftArrow {
+                interactionCoordinator?.switchSource(forward: false)
+                return
+            }
+        }
         super.keyDown(with: event)
     }
 
@@ -242,7 +253,13 @@ final class GalaxySceneCoordinator: NSObject {
         let signature = itemSignature(items)
         var didRebuild = false
         if renderedSignature != signature {
-            if canRelayout(items) {
+            if isSourceTransitioning {
+                // 旋转更替进行中:重建统一由动画回调执行,
+                // 避免中途无动画重建造成词条半透明闪现
+            } else if let forward = model?.pendingSourceSwitch {
+                model?.pendingSourceSwitch = nil
+                beginSpinTransition(forward: forward)
+            } else if canRelayout(items) {
                 animateLayout(items: items, signature: signature)
             } else {
                 rebuild(items: items, signature: signature)
@@ -333,6 +350,69 @@ final class GalaxySceneCoordinator: NSObject {
     func editSelection() {
         guard let item = model?.selectedItem else { return }
         model?.pendingEdit = item
+    }
+
+    /// Shift+Option+→/← 在词库球与剪贴板球间切换(两个固定位置:词库在左、剪贴板在右);
+    /// 已在边缘时忽略;动画进行中忽略后续请求
+    func switchSource(forward: Bool) {
+        guard let model, !isSourceTransitioning else { return }
+        if forward, model.source == .clipboard { return }
+        if !forward, model.source == .library { return }
+        beginSpinTransition(forward: forward)
+        model.selectedItem = nil
+        // source 变化会驱动 SwiftUI 重建 items;动画期间到达的任何 update 都被挂起,
+        // 由动画回调统一用最新数据重建,消除时序竞争
+        model.source = forward ? .clipboard : .library
+    }
+
+    // MARK: - 源切换旋转更替(球壳圆形对称保持不动,动效仅在词条层)
+
+    private var isSourceTransitioning = false
+    /// 切换时的角速度冲量(rad/s;经惯性系统自然衰减,约转 1/3 圈)
+    private static let sourceSpinImpulse: Float = 7
+
+    private func beginSpinTransition(forward: Bool) {
+        isSourceTransitioning = true
+        model?.pendingSourceSwitch = nil
+        // 1) 旋转冲量:方向跟随按键;惯性系统会让它自然减速回怠速自转
+        yawVelocity = forward ? Self.sourceSpinImpulse : -Self.sourceSpinImpulse
+        pitchVelocity = 0
+        // 2) 旧词条群:短暂停留后边转边淡出
+        labelsRoot.runAction(.sequence([
+            .wait(duration: 0.10),
+            .fadeOpacity(to: 0, duration: 0.15),
+            // SCNAction 回调上下文非隔离:回主线程后再做重建与状态复位
+            .run { [weak self] _ in
+                DispatchQueue.main.async {
+                    MainActor.assumeIsolated {
+                        self?.finishSpinTransition()
+                    }
+                }
+            },
+        ]))
+    }
+
+    /// 淡出中点:以当时的最新 items 重建并淡入(动画期间到达的全部 update 已被挂起,
+    /// 此处是唯一重建点,消除双重建竞态造成的闪现)
+    private func finishSpinTransition() {
+        guard isSourceTransitioning else { return }
+        let items = latestItems
+        rebuild(items: items, signature: itemSignature(items))
+        if let fontScale = appliedFontScale {
+            applyTextScale(fontScale)
+        }
+        labelsRoot.opacity = 0
+        labelsRoot.runAction(.sequence([
+            .fadeOpacity(to: 1, duration: 0.20),
+            .run { [weak self] _ in
+                DispatchQueue.main.async {
+                    MainActor.assumeIsolated {
+                        self?.isSourceTransitioning = false
+                        self?.model?.pendingSourceSwitch = nil
+                    }
+                }
+            },
+        ]))
     }
 
     private func configureScene() {
