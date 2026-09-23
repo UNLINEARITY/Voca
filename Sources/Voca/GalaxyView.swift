@@ -127,18 +127,25 @@ struct GalaxyItem: Equatable {
     }
 
     var sphereText: String {
+        // 球面文字一律单行:换行/连续空白折叠为一个空格再截断。
+        // 多行文本(常见于剪贴板段落)若原样渲染,会被压进固定高度文字带,
+        // 行与行叠在一起且字号骤缩
+        let flattened = text
+            .components(separatedBy: .whitespacesAndNewlines)
+            .filter { !$0.isEmpty }
+            .joined(separator: " ")
         let font = NSFont.systemFont(ofSize: fontSize, weight: .medium)
         let lineHeight = font.ascender - font.descender + font.leading
         let maximumWidth = CGFloat(Self.maximumTextAngle / angularHeight) * lineHeight
         let attributes: [NSAttributedString.Key: Any] = [.font: font]
-        if (text as NSString).size(withAttributes: attributes).width <= maximumWidth {
-            return text
+        if (flattened as NSString).size(withAttributes: attributes).width <= maximumWidth {
+            return flattened
         }
 
         let ellipsisWidth = ("…" as NSString).size(withAttributes: attributes).width
         var result = ""
         var width: CGFloat = 0
-        for character in text {
+        for character in flattened {
             let value = String(character)
             let characterWidth = (value as NSString).size(withAttributes: attributes).width
             guard width + characterWidth + ellipsisWidth <= maximumWidth else { break }
