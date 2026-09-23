@@ -81,6 +81,10 @@ final class GalaxyModel: ObservableObject {
 
     @Published private(set) var items: [GalaxyItem] = []
     @Published var selectedClip: Clip?
+    @Published var isTimelineVisible = false
+    @Published var timelinePage = 0
+    var timelinePageCount = 1
+    private var timelineScrollDelta: CGFloat = 0
     @Published var fontScale: Double {
         didSet { UserDefaults.standard.set(fontScale, forKey: "galaxyFontScale") }
     }
@@ -118,7 +122,7 @@ final class GalaxyModel: ObservableObject {
             return GalaxyItem(
                 clipId: clip.id ?? 0,
                 text: Self.displayText(clip.text),
-                fontSize: Self.fontSize(for: clip.count),
+                fontSize: 25,
                 clip: clip,
                 position: SIMD3(
                     horizontalRadius * cos(theta),
@@ -128,14 +132,34 @@ final class GalaxyModel: ObservableObject {
             )
         }
         selectedClip = nil
+        isTimelineVisible = false
+        timelinePage = 0
+    }
+
+    func turnTimelinePage(with event: NSEvent) {
+        guard isTimelineVisible, timelinePageCount > 1,
+              event.momentumPhase == [] else { return }
+        if event.phase == .began {
+            timelineScrollDelta = 0
+        }
+        let direction: CGFloat = event.isDirectionInvertedFromDevice ? -1 : 1
+        let delta = event.scrollingDeltaY * direction
+        guard delta != 0 else { return }
+        if !event.hasPreciseScrollingDeltas {
+            timelinePage = min(max(timelinePage + (delta < 0 ? 1 : -1), 0), timelinePageCount - 1)
+            return
+        }
+        timelineScrollDelta += delta
+        guard abs(timelineScrollDelta) >= 60 else { return }
+        timelinePage = min(
+            max(timelinePage + (timelineScrollDelta < 0 ? 1 : -1), 0),
+            timelinePageCount - 1
+        )
+        timelineScrollDelta = 0
     }
 
     func zoom(by factor: Double) {
         fontScale = min(max(fontScale * factor, 0.5), 2.5)
-    }
-
-    static func fontSize(for count: Int) -> CGFloat {
-        13 + min(17.0, log2(Double(max(count, 1))) * 4.5)
     }
 
     static func displayText(_ text: String) -> String {
@@ -210,9 +234,15 @@ final class GalaxyWindowController {
 
     private func installEventMonitor() {
         removeEventMonitor()
-        eventMonitor = NSEvent.addLocalMonitorForEvents(matching: .keyDown) {
+        eventMonitor = NSEvent.addLocalMonitorForEvents(matching: [.keyDown, .scrollWheel]) {
             [weak self] event in
-            guard let self, self.isOpen, event.keyCode == 53 else { return event }
+            guard let self, self.isOpen else { return event }
+            if event.type == .scrollWheel, self.model.isTimelineVisible,
+               event.window === self.window {
+                self.model.turnTimelinePage(with: event)
+                return nil
+            }
+            guard event.type == .keyDown, event.keyCode == 53 else { return event }
             if self.model.selectedClip != nil {
                 self.model.selectedClip = nil
             } else {
@@ -246,11 +276,6 @@ final class GalaxyWindowController {
 
 // MARK: - 星图视图
 
-private enum GalaxySelectionMode {
-    case attributes
-    case timeline
-}
-
 private enum GalaxyOrbitSide {
     case left
     case right
@@ -264,7 +289,6 @@ private struct GalaxyView: View {
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
     @State private var editingClip: Clip?
     @State private var timelineEvents: [ClipEvent] = []
-    @State private var selectionMode = GalaxySelectionMode.attributes
     @State private var selectedTimelineIndex = 0
     @State private var showTuning = false
 
@@ -280,6 +304,11 @@ private struct GalaxyView: View {
                     topBar
                     Spacer()
                     if let clip = model.selectedClip {
+                        if !model.isTimelineVisible,
+                           let note = clip.note,
+                           !note.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+                            noteBelowSphere(note, availableWidth: geometry.size.width)
+                        }
                         selectionActions(clip)
                     } else {
                         hintBar
@@ -308,16 +337,22 @@ private struct GalaxyView: View {
                 }
             }
             .animation(selectionAnimation, value: model.selectedClip?.id)
-            .animation(selectionAnimation, value: selectionMode)
+            .animation(selectionAnimation, value: model.isTimelineVisible)
+            .animation(selectionAnimation, value: model.timelinePage)
         }
         .background(.clear)
         .onChange(of: model.selectedClip) { _, clip in
             timelineEvents = clip.map { store.events(for: $0) } ?? []
-            selectionMode = .attributes
+            model.timelinePageCount = max(1, (timelineEvents.count + 5) / 6)
+            model.isTimelineVisible = false
+            model.timelinePage = 0
             selectedTimelineIndex = 0
             if clip != nil {
                 showTuning = false
             }
+        }
+        .onChange(of: model.timelinePage) { _, _ in
+            selectedTimelineIndex = 0
         }
         .sheet(item: $editingClip) { clip in
             EditClipSheet(clip: clip) { text, note in
@@ -456,6 +491,33 @@ private struct GalaxyView: View {
             .glassEffect(.regular, in: Capsule())
     }
 
+    private func noteBelowSphere(_ note: String, availableWidth: CGFloat) -> some View {
+        let width = min(560, max(220, availableWidth - 48))
+        let textHeight = (note as NSString).boundingRect(
+            with: CGSize(width: width - 36, height: .greatestFiniteMagnitude),
+            options: [.usesLineFragmentOrigin, .usesFontLeading],
+            attributes: [.font: NSFont.systemFont(ofSize: 14)]
+        ).height
+
+        return ScrollView(.vertical) {
+            Text(note)
+                .font(.system(size: 14))
+                .foregroundStyle(.primary)
+                .frame(maxWidth: .infinity, alignment: .leading)
+                .fixedSize(horizontal: false, vertical: true)
+                .textSelection(.enabled)
+                .padding(.horizontal, 18)
+                .padding(.vertical, 14)
+        }
+        .frame(width: width, height: min(160, max(44, ceil(textHeight) + 28)))
+        .glassEffect(
+            .regular,
+            in: RoundedRectangle(cornerRadius: 16, style: .continuous)
+        )
+        .padding(.bottom, 12)
+        .accessibilityLabel("注释")
+    }
+
     // MARK: 实时调参面板
 
     private var tuningPanel: some View {
@@ -534,7 +596,8 @@ private struct GalaxyView: View {
 
     // MARK: 选择轨道
 
-    private static let maximumTimelineTicks = 32
+    private static let timelinePageSize = 6
+    private static let orbitLabelGap: CGFloat = 43
 
     private var selectionAnimation: Animation {
         reduceMotion ? .linear(duration: 0.12) : .snappy(duration: 0.30)
@@ -547,7 +610,9 @@ private struct GalaxyView: View {
     }
 
     private var visibleTimelineEvents: [ClipEvent] {
-        Array(timelineEvents.prefix(Self.maximumTimelineTicks))
+        let start = model.timelinePage * Self.timelinePageSize
+        guard start < timelineEvents.count else { return [] }
+        return Array(timelineEvents.dropFirst(start).prefix(Self.timelinePageSize))
     }
 
     private var selectedTimelineEvent: ClipEvent? {
@@ -566,13 +631,20 @@ private struct GalaxyView: View {
         let preferredRadius = (sphereRadius + lensRadius) / 2
         let verticalLimit = max(120, canvasSize.height / 2 - 72)
         let orbitRadius = min(preferredRadius, verticalLimit)
-        let sideRoom = (canvasSize.width - orbitRadius * 2) / 2 - 32
-        let sideWidth = min(260, max(120, sideRoom))
+        let sideRoom = (canvasSize.width - orbitRadius * 2) / 2 - Self.orbitLabelGap - 8
+        let sideWidth = min(208, max(120, sideRoom))
         let verticalOffset = min(190, orbitRadius * 0.48)
 
         return ZStack {
-            switch selectionMode {
-            case .attributes:
+            if model.isTimelineVisible {
+                timelineOrbit(
+                    canvasSize: canvasSize,
+                    radius: orbitRadius,
+                    sideWidth: sideWidth
+                )
+                .id(model.timelinePage)
+                .transition(.opacity)
+            } else {
                 attributeOrbit(
                     clip,
                     canvasSize: canvasSize,
@@ -581,18 +653,11 @@ private struct GalaxyView: View {
                     verticalOffset: verticalOffset
                 )
                 .transition(.opacity)
-            case .timeline:
-                timelineOrbit(
-                    canvasSize: canvasSize,
-                    radius: orbitRadius,
-                    sideWidth: sideWidth
-                )
-                .transition(.opacity)
             }
         }
         .frame(width: canvasSize.width, height: canvasSize.height)
         .accessibilityElement(children: .contain)
-        .accessibilityLabel(selectionMode == .attributes ? "词条属性" : "词条时间线")
+        .accessibilityLabel(model.isTimelineVisible ? "词条时间线" : "词条属性")
     }
 
     private func attributeOrbit(
@@ -603,10 +668,8 @@ private struct GalaxyView: View {
         verticalOffset: CGFloat
     ) -> some View {
         let center = CGPoint(x: canvasSize.width / 2, y: canvasSize.height / 2)
-        let leftX = center.x - radius - 24 - sideWidth / 2
-        let rightX = center.x + radius + 24 + sideWidth / 2
-        let note = clip.note?.trimmingCharacters(in: .whitespacesAndNewlines)
-        let noteText = note.flatMap { $0.isEmpty ? nil : $0 } ?? "无注释"
+        let leftX = center.x - radius - Self.orbitLabelGap - sideWidth / 2
+        let rightX = center.x + radius + Self.orbitLabelGap + sideWidth / 2
         let sourceURL = clip.url.flatMap(URL.init(string:))
         let sourceName = sourceURL?.host ?? "无网页来源"
 
@@ -614,7 +677,7 @@ private struct GalaxyView: View {
             orbitConnectorGuide(
                 canvasSize: canvasSize,
                 radius: radius,
-                verticalOffsets: [-verticalOffset, 0, verticalOffset]
+                verticalOffsets: [-verticalOffset, verticalOffset]
             )
 
             orbitAttribute(
@@ -625,16 +688,6 @@ private struct GalaxyView: View {
             )
             .frame(width: sideWidth)
             .position(x: leftX, y: center.y - verticalOffset)
-
-            orbitAttribute(
-                title: "注释",
-                value: noteText,
-                systemImage: "quote.opening",
-                side: .left,
-                lineLimit: 2
-            )
-            .frame(width: sideWidth)
-            .position(x: leftX, y: center.y)
 
             if let sourceURL {
                 orbitAttribute(
@@ -667,15 +720,6 @@ private struct GalaxyView: View {
             .position(x: rightX, y: center.y - verticalOffset)
 
             orbitAttribute(
-                title: "最近保存",
-                value: clip.lastSeenAt.formatted(date: .abbreviated, time: .shortened),
-                systemImage: "clock",
-                side: .right
-            )
-            .frame(width: sideWidth)
-            .position(x: rightX, y: center.y)
-
-            orbitAttribute(
                 title: "时间线",
                 value: timelineEvents.isEmpty ? "无记录" : "\(timelineEvents.count) 次记录",
                 systemImage: "clock.arrow.trianglehead.counterclockwise.rotate.90",
@@ -683,7 +727,7 @@ private struct GalaxyView: View {
                 action: timelineEvents.isEmpty ? nil : {
                     withAnimation(selectionAnimation) {
                         selectedTimelineIndex = 0
-                        selectionMode = .timeline
+                        model.isTimelineVisible = true
                     }
                 }
             )
@@ -698,26 +742,31 @@ private struct GalaxyView: View {
         sideWidth: CGFloat
     ) -> some View {
         let center = CGPoint(x: canvasSize.width / 2, y: canvasSize.height / 2)
-        let leftX = center.x - radius - 24 - sideWidth / 2
-        let rightX = center.x + radius + 24 + sideWidth / 2
         let events = visibleTimelineEvents
+        let rows = (events.count + 1) / 2
+        let spacing = min(172, radius * 0.48)
+        let arcHalfHeight = CGFloat(max(0, rows - 1)) * spacing / 2
 
         return ZStack {
-            Circle()
-                .stroke(
-                    .secondary.opacity(0.18),
-                    style: StrokeStyle(lineWidth: 0.75, dash: [1.5, 6])
-                )
-                .frame(width: radius * 2, height: radius * 2)
-                .position(center)
-                .allowsHitTesting(false)
+            Canvas { context, _ in
+                for direction in [-1.0, 1.0] {
+                    var arc = Path()
+                    for step in 0...32 {
+                        let offset = arcHalfHeight * (CGFloat(step) / 16 - 1)
+                        let x = sqrt(max(0, radius * radius - offset * offset))
+                        let point = CGPoint(
+                            x: center.x + direction * x,
+                            y: center.y + offset
+                        )
+                        if step == 0 { arc.move(to: point) } else { arc.addLine(to: point) }
+                    }
+                    context.stroke(arc, with: .color(.secondary.opacity(0.28)), lineWidth: 0.8)
+                }
+            }
+            .allowsHitTesting(false)
+            .accessibilityHidden(true)
 
             if events.isEmpty {
-                orbitConnectorGuide(
-                    canvasSize: canvasSize,
-                    radius: radius,
-                    verticalOffsets: [0]
-                )
                 orbitAttribute(
                     title: "时间线",
                     value: "暂无记录",
@@ -725,63 +774,43 @@ private struct GalaxyView: View {
                     side: .left
                 )
                 .frame(width: sideWidth)
-                .position(x: leftX, y: center.y)
+                .position(x: center.x - radius - Self.orbitLabelGap - sideWidth / 2, y: center.y)
             } else {
                 ForEach(Array(events.enumerated()), id: \.offset) { index, event in
-                    let angle = -Double.pi / 2
-                        + Double(index) / Double(events.count) * Double.pi * 2
-                    let point = CGPoint(
-                        x: center.x + cos(angle) * radius,
-                        y: center.y + sin(angle) * radius
-                    )
+                    let side: GalaxyOrbitSide = index.isMultiple(of: 2) ? .left : .right
+                    let direction: CGFloat = side == .left ? -1 : 1
+                    let offset = (CGFloat(index / 2) - CGFloat(rows - 1) / 2) * spacing
+                    let pointX = center.x + direction
+                        * sqrt(max(0, radius * radius - offset * offset))
+                    let selected = index == selectedTimelineIndex
 
-                    timelineTick(event, index: index, angle: angle)
-                        .position(point)
-                }
+                    Circle()
+                        .fill(selected ? Color.accentColor : Color.secondary.opacity(0.65))
+                        .frame(width: selected ? 9 : 6, height: selected ? 9 : 6)
+                        .position(x: pointX, y: center.y + offset)
+                        .allowsHitTesting(false)
 
-                orbitConnectorGuide(
-                    canvasSize: canvasSize,
-                    radius: radius,
-                    verticalOffsets: [0]
-                )
-
-                if let event = selectedTimelineEvent {
                     orbitAttribute(
-                        title: "发生时间",
+                        title: "\(model.timelinePage * Self.timelinePageSize + index + 1) · \(timelineSource(for: event))",
                         value: event.date.formatted(date: .abbreviated, time: .shortened),
-                        systemImage: "clock",
-                        side: .left
+                        systemImage: selected ? "circle.fill" : "circle",
+                        side: side,
+                        lineLimit: 2,
+                        action: {
+                            withAnimation(selectionAnimation) {
+                                selectedTimelineIndex = index
+                            }
+                        }
                     )
                     .frame(width: sideWidth)
-                    .position(x: leftX, y: center.y)
-
-                    if let urlString = event.url, let url = URL(string: urlString) {
-                        orbitAttribute(
-                            title: "来源",
-                            value: timelineSource(for: event),
-                            systemImage: "link",
-                            side: .right,
-                            action: { NSWorkspace.shared.open(url) }
-                        )
-                        .frame(width: sideWidth)
-                        .position(x: rightX, y: center.y)
-                    } else {
-                        orbitAttribute(
-                            title: "来源",
-                            value: timelineSource(for: event),
-                            systemImage: "app.dashed",
-                            side: .right
-                        )
-                        .frame(width: sideWidth)
-                        .position(x: rightX, y: center.y)
+                    .overlay {
+                        RoundedRectangle(cornerRadius: 12, style: .continuous)
+                            .strokeBorder(Color.accentColor.opacity(selected ? 0.65 : 0), lineWidth: 1)
                     }
-                }
-
-                if timelineEvents.count > events.count {
-                    Text("最近 \(events.count) / \(timelineEvents.count) 条")
-                        .font(.caption2.monospacedDigit())
-                        .foregroundStyle(.tertiary)
-                        .position(x: center.x, y: center.y + radius - 18)
+                    .position(
+                        x: center.x + direction * (radius + Self.orbitLabelGap + sideWidth / 2),
+                        y: center.y + offset
+                    )
                 }
             }
         }
@@ -802,7 +831,7 @@ private struct GalaxyView: View {
                         y: center.y + offset
                     )
                     let end = CGPoint(
-                        x: center.x + (radius + 18) * direction,
+                        x: center.x + (radius + Self.orbitLabelGap - 6) * direction,
                         y: center.y + offset
                     )
                     var path = Path()
@@ -819,42 +848,6 @@ private struct GalaxyView: View {
         .frame(width: canvasSize.width, height: canvasSize.height)
         .allowsHitTesting(false)
         .accessibilityHidden(true)
-    }
-
-    private func timelineTick(
-        _ event: ClipEvent,
-        index: Int,
-        angle: Double
-    ) -> some View {
-        let selected = index == selectedTimelineIndex
-        return Button {
-            withAnimation(selectionAnimation) {
-                selectedTimelineIndex = index
-            }
-        } label: {
-            Capsule()
-                .fill(selected ? Color.accentColor : Color.secondary.opacity(0.46))
-                .frame(width: selected ? 3 : 1.5, height: selected ? 16 : 10)
-                .frame(width: 20, height: 20)
-                .contentShape(Circle())
-        }
-        .buttonStyle(.plain)
-        .rotationEffect(.radians(angle + Double.pi / 2))
-        .onHover { hovering in
-            guard hovering, selectedTimelineIndex != index else { return }
-            withAnimation(selectionAnimation) {
-                selectedTimelineIndex = index
-            }
-        }
-        .help(
-            "\(event.date.formatted(date: .abbreviated, time: .shortened)) · "
-                + (event.appName ?? "未知来源")
-        )
-        .accessibilityLabel("时间线记录 \(index + 1)")
-        .accessibilityValue(
-            "\(event.date.formatted(date: .abbreviated, time: .shortened))，"
-                + (event.appName ?? "未知来源")
-        )
     }
 
     @ViewBuilder
@@ -907,12 +900,12 @@ private struct GalaxyView: View {
                     .accessibilityHidden(true)
             }
 
-            VStack(alignment: side == .left ? .trailing : .leading, spacing: 2) {
+            VStack(alignment: side == .left ? .trailing : .leading, spacing: 3) {
                 Text(title)
-                    .font(.caption2)
-                    .foregroundStyle(.tertiary)
+                    .font(.system(size: 17, weight: .semibold))
+                    .foregroundStyle(.primary)
                 Text(value)
-                    .font(.callout.weight(.medium))
+                    .font(.system(size: 15, weight: .semibold))
                     .foregroundStyle(.primary)
                     .lineLimit(lineLimit)
                     .truncationMode(.tail)
@@ -927,10 +920,10 @@ private struct GalaxyView: View {
             }
         }
         .padding(.horizontal, 12)
-        .padding(.vertical, 8)
+        .padding(.vertical, 10)
         .frame(
             maxWidth: .infinity,
-            minHeight: 44,
+            minHeight: 56,
             alignment: side == .left ? .trailing : .leading
         )
         .glassEffect(
@@ -946,10 +939,10 @@ private struct GalaxyView: View {
     private func selectionActions(_ clip: Clip) -> some View {
         GlassEffectContainer(spacing: 10) {
             HStack(spacing: 10) {
-                if selectionMode == .timeline {
+                if model.isTimelineVisible {
                     Button {
                         withAnimation(selectionAnimation) {
-                            selectionMode = .attributes
+                            model.isTimelineVisible = false
                         }
                     } label: {
                         Image(systemName: "arrow.uturn.backward")
@@ -957,6 +950,34 @@ private struct GalaxyView: View {
                     }
                     .buttonStyle(.glassProminent)
                     .help("返回词条属性")
+
+                    Button {
+                        withAnimation(selectionAnimation) {
+                            model.timelinePage -= 1
+                        }
+                    } label: {
+                        Image(systemName: "chevron.left")
+                            .frame(width: 20, height: 20)
+                    }
+                    .buttonStyle(.glass)
+                    .disabled(model.timelinePage == 0)
+                    .help("查看较新的记录")
+
+                    Text("\(model.timelinePage + 1) / \(model.timelinePageCount)")
+                        .font(.caption.monospacedDigit())
+                        .foregroundStyle(.secondary)
+
+                    Button {
+                        withAnimation(selectionAnimation) {
+                            model.timelinePage += 1
+                        }
+                    } label: {
+                        Image(systemName: "chevron.right")
+                            .frame(width: 20, height: 20)
+                    }
+                    .buttonStyle(.glass)
+                    .disabled(model.timelinePage + 1 >= model.timelinePageCount)
+                    .help("查看更早的记录")
 
                     if let urlString = selectedTimelineEvent?.url,
                        let url = URL(string: urlString) {
@@ -1002,7 +1023,7 @@ private struct GalaxyView: View {
             }
         }
         .accessibilityElement(children: .contain)
-        .accessibilityLabel(selectionMode == .timeline ? "时间线操作" : "词条操作")
+        .accessibilityLabel(model.isTimelineVisible ? "时间线操作" : "词条操作")
     }
 
     private func timelineSource(for event: ClipEvent) -> String {

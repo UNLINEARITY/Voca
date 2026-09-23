@@ -148,12 +148,11 @@ final class GalaxySceneCoordinator: NSObject {
     private static let maximumTextAngle: Float = 1.18
     private static let fontAngleScale: CGFloat = 0.00325
     private static let baseAutoRotate: Float = 0.06
+    private static let selectedLift: Float = 0.09
 
     private struct RenderedLabel {
         let item: GalaxyItem
         let node: SCNNode
-        let displayedText: String
-        let renderFontSize: CGFloat
     }
 
     private weak var model: GalaxyModel?
@@ -235,8 +234,8 @@ final class GalaxySceneCoordinator: NSObject {
         if renderedSignature != signature {
             rebuild(items: items, signature: signature)
         }
-        applyTextScale(fontScale)
         updateSelection(selectedID)
+        applyTextScale(fontScale)
     }
 
     func beginDrag(at point: CGPoint, time: TimeInterval) {
@@ -353,17 +352,13 @@ final class GalaxySceneCoordinator: NSObject {
                 text: layout.text,
                 renderFontSize: layout.renderFontSize,
                 angularWidth: layout.angularWidth,
-                angularHeight: layout.angularHeight,
-                selected: item.clipId == selectedID
+                angularHeight: layout.angularHeight
             )
             node.opacity = selectedID == nil || item.clipId == selectedID ? 1 : 0.38
+            node.simdPosition = item.clipId == selectedID
+                ? simd_normalize(item.position) * Self.selectedLift : .zero
             labelsRoot.addChildNode(node)
-            labels[item.clipId] = RenderedLabel(
-                item: item,
-                node: node,
-                displayedText: layout.text,
-                renderFontSize: layout.renderFontSize
-            )
+            labels[item.clipId] = RenderedLabel(item: item, node: node)
         }
         SCNTransaction.commit()
 
@@ -371,21 +366,14 @@ final class GalaxySceneCoordinator: NSObject {
     }
 
     private func applyTextScale(_ scale: Double) {
-        let clampedScale = min(max(scale, 0.5), 2.5)
-        let smallWeight: CGFloat
-        let largeWeight: CGFloat
-        if clampedScale < 1 {
-            smallWeight = CGFloat((1 - clampedScale) / 0.5)
-            largeWeight = 0
-        } else {
-            smallWeight = 0
-            largeWeight = CGFloat((clampedScale - 1) / 1.5)
-        }
-
         SCNTransaction.begin()
-        SCNTransaction.animationDuration = 0.08
+        SCNTransaction.animationDuration = 0.18
         SCNTransaction.animationTimingFunction = CAMediaTimingFunction(name: .easeOut)
-        for label in labels.values {
+        for (clipID, label) in labels {
+            let emphasis = clipID == selectedID ? 1.12 : 1.0
+            let textScale = min(max(scale * emphasis, 0.5), 2.5)
+            let smallWeight = textScale < 1 ? CGFloat((1 - textScale) / 0.5) : 0
+            let largeWeight = textScale > 1 ? CGFloat((textScale - 1) / 1.5) : 0
             label.node.morpher?.setWeight(smallWeight, forTargetAt: 0)
             label.node.morpher?.setWeight(largeWeight, forTargetAt: 1)
         }
@@ -394,7 +382,6 @@ final class GalaxySceneCoordinator: NSObject {
 
     private func updateSelection(_ newSelection: Int64?) {
         guard selectedID != newSelection else { return }
-        let previousSelection = selectedID
         selectedID = newSelection
 
         SCNTransaction.begin()
@@ -402,19 +389,10 @@ final class GalaxySceneCoordinator: NSObject {
         SCNTransaction.animationTimingFunction = CAMediaTimingFunction(name: .easeOut)
         for (clipID, label) in labels {
             label.node.opacity = newSelection == nil || clipID == newSelection ? 1 : 0.38
+            label.node.simdPosition = clipID == newSelection
+                ? simd_normalize(label.item.position) * Self.selectedLift : .zero
         }
-        updateMaterial(for: previousSelection, selected: false)
-        updateMaterial(for: newSelection, selected: true)
         SCNTransaction.commit()
-    }
-
-    private func updateMaterial(for clipID: Int64?, selected: Bool) {
-        guard let clipID, let label = labels[clipID] else { return }
-        label.node.geometry?.firstMaterial = makeTextMaterial(
-            text: label.displayedText,
-            fontSize: label.renderFontSize,
-            selected: selected
-        )
     }
 
     private func makeLayout(
@@ -428,7 +406,7 @@ final class GalaxySceneCoordinator: NSObject {
         let maximumTextWidth = CGFloat(Self.maximumTextAngle / angularHeight) * lineHeight
         let text = truncated(item.text, font: logicalFont, maximumWidth: maximumTextWidth)
         let renderFontSize = max(42, item.fontSize * 3)
-        let image = textImage(text, fontSize: renderFontSize, selected: false)
+        let image = textImage(text, fontSize: renderFontSize)
         let aspectRatio = Float(image.size.width / max(1, image.size.height))
         return (
             text,
@@ -463,8 +441,7 @@ final class GalaxySceneCoordinator: NSObject {
         text: String,
         renderFontSize: CGFloat,
         angularWidth: Float,
-        angularHeight: Float,
-        selected: Bool
+        angularHeight: Float
     ) -> SCNNode {
         let segments = max(12, min(96, text.count * 2))
         let geometry = makeRibbonGeometry(
@@ -475,8 +452,7 @@ final class GalaxySceneCoordinator: NSObject {
         )
         geometry.firstMaterial = makeTextMaterial(
             text: text,
-            fontSize: renderFontSize,
-            selected: selected
+            fontSize: renderFontSize
         )
 
         let morpher = SCNMorpher()
@@ -572,12 +548,11 @@ final class GalaxySceneCoordinator: NSObject {
 
     private func makeTextMaterial(
         text: String,
-        fontSize: CGFloat,
-        selected: Bool
+        fontSize: CGFloat
     ) -> SCNMaterial {
         let material = SCNMaterial()
         material.lightingModel = .constant
-        material.diffuse.contents = textImage(text, fontSize: fontSize, selected: selected)
+        material.diffuse.contents = textImage(text, fontSize: fontSize)
         material.diffuse.magnificationFilter = .linear
         material.diffuse.minificationFilter = .linear
         material.diffuse.mipFilter = .linear
@@ -589,24 +564,21 @@ final class GalaxySceneCoordinator: NSObject {
         return material
     }
 
-    private func textImage(_ text: String, fontSize: CGFloat, selected: Bool) -> NSImage {
+    private func textImage(_ text: String, fontSize: CGFloat) -> NSImage {
         let font = NSFont.systemFont(ofSize: fontSize, weight: .medium)
         let shadow = NSShadow()
-        shadow.shadowColor = NSColor.black.withAlphaComponent(selected ? 0.92 : 0.78)
-        shadow.shadowBlurRadius = selected ? 7 : 2
+        shadow.shadowColor = NSColor.black.withAlphaComponent(0.78)
+        shadow.shadowBlurRadius = 2
         shadow.shadowOffset = CGSize(width: 0, height: -1)
-        let fillColor = selected
-            ? NSColor(calibratedRed: 1.00, green: 0.72, blue: 0.20, alpha: 1)
-            : NSColor(calibratedRed: 0.98, green: 0.96, blue: 0.89, alpha: 1)
         let attributes: [NSAttributedString.Key: Any] = [
             .font: font,
-            .foregroundColor: fillColor,
+            .foregroundColor: NSColor(calibratedRed: 0.98, green: 0.96, blue: 0.89, alpha: 1),
             .strokeColor: NSColor(calibratedWhite: 0.08, alpha: 0.94),
             .strokeWidth: -4.5,
             .shadow: shadow,
         ]
         let measuredSize = (text as NSString).size(withAttributes: attributes)
-        let padding: CGFloat = selected ? 22 : 8
+        let padding: CGFloat = 8
         let image = NSImage(
             size: CGSize(
                 width: ceil(measuredSize.width + padding * 2),
