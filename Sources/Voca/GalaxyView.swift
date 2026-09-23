@@ -17,6 +17,7 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
 
 import AppKit
+import Carbon.HIToolbox
 import SwiftUI
 import simd
 
@@ -79,6 +80,8 @@ final class GalaxyTuning: ObservableObject {
 // MARK: - 球面数据
 
 enum GalaxySource: String, CaseIterable {
+    /// 空间顺序即切换顺序:折射(左)↔词库(中)↔剪贴板(右)
+    case refraction
     case library
     case clipboard
 }
@@ -172,7 +175,7 @@ final class GalaxyModel: ObservableObject {
             ?? 1.0
     }
 
-    func rebuild(from clips: [Clip]) {
+    func rebuild(from clips: [Clip], announceSampling: Bool = true) {
         let sampled: [Clip]
         if clips.count > Self.maxItems {
             sampled = Array(
@@ -180,7 +183,9 @@ final class GalaxyModel: ObservableObject {
                     .sorted { ($0.count, $0.lastSeenAt) > ($1.count, $1.lastSeenAt) }
                     .prefix(Self.maxItems)
             )
-            ToastController.shared.show("星图显示前 \(Self.maxItems) 条（按频次与最近度）")
+            if announceSampling {
+                ToastController.shared.show("星图显示前 \(Self.maxItems) 条（按频次与最近度）")
+            }
         } else {
             sampled = clips
         }
@@ -466,6 +471,10 @@ private struct GalaxyView: View {
     @State private var timelineEvents: [ClipEvent] = []
     @State private var selectedTimelineIndex = 0
     @State private var showTuning = false
+    /// 折射模式的词库检索词
+    @State private var refractionQuery = ""
+    /// ⇧⌥/⇧⌘+方向键切换的本地事件监听句柄
+    @State private var arrowSwitchMonitor: Any?
 
     var body: some View {
         GeometryReader { geometry in
@@ -473,7 +482,9 @@ private struct GalaxyView: View {
         }
         .background(.clear)
         .onChange(of: tuning.distribution) { _, _ in handleDistributionChange() }
-        .onChange(of: model.source) { _, source in handleSourceChange(source) }
+        .onChange(of: model.source) { oldSource, newSource in
+            handleSourceChange(from: oldSource, to: newSource)
+        }
         .onChange(of: watcher.entries) { _, entries in handleClipboardEntries(entries) }
         .onChange(of: model.selectedItem?.clipId) { _, _ in handleSelectionChange() }
         .onChange(of: model.timelinePage) { _, _ in selectedTimelineIndex = 0 }
@@ -503,6 +514,13 @@ private struct GalaxyView: View {
             VStack {
                 topBar
                 Spacer()
+                if model.source == .refraction {
+                    refractionSearchBar
+                        .padding(.bottom, 10)
+                        .onChange(of: refractionQuery) { _, query in
+                            applyRefractionQuery(query)
+                        }
+                }
                 selectionDetail(availableWidth: geometry.size.width)
             }
             .padding(20)
@@ -530,6 +548,12 @@ private struct GalaxyView: View {
         .animation(selectionAnimation, value: model.selectedItem?.clipId)
         .animation(selectionAnimation, value: model.isTimelineVisible)
         .animation(selectionAnimation, value: model.timelinePage)
+        .onAppear {
+            installArrowSwitchMonitor()
+        }
+        .onDisappear {
+            removeArrowSwitchMonitor()
+        }
     }
 
     private var deletingClipboard: Bool {
@@ -542,20 +566,25 @@ private struct GalaxyView: View {
         model.relayout()
     }
 
-    private func handleSourceChange(_ source: GalaxySource) {
+    private func handleSourceChange(from oldSource: GalaxySource, to source: GalaxySource) {
         model.selectedItem = nil
-        // 顶栏切换无方向语义,按目标位置推导:词库在左、剪贴板在右;
-        // 快捷键路径已携带方向,不覆盖
+        // 顶栏切换无方向语义,按两个源的固定位置推导;快捷键路径已携带方向,不覆盖
         if model.pendingSourceSwitch == nil {
-            model.pendingSourceSwitch = (source == .clipboard)
+            let order = GalaxySource.allCases
+            model.pendingSourceSwitch =
+                order.firstIndex(of: source)! > order.firstIndex(of: oldSource)!
         }
         // 无障碍:减弱动态效果时不播旋转动效,直接重建
         if reduceMotion {
             model.pendingSourceSwitch = nil
         }
-        if source == .library {
+        switch source {
+        case .refraction:
+            // 折射 = 词库检索视图:按当前关键词过滤词库
+            model.rebuild(from: refractionFilteredClips(), announceSampling: false)
+        case .library:
             model.rebuild(from: store.clips)
-        } else {
+        case .clipboard:
             model.rebuild(fromClipboard: watcher.entries)
         }
     }
@@ -639,27 +668,26 @@ private struct GalaxyView: View {
     }
 
     private func sphere(diameter: CGFloat) -> some View {
-        // 球本体 = 磨砂核；外扩环为折射透镜环
+        // 三种源共用同一套球体视觉(磨砂核 + 折射透镜环);折射模式仅在内容上不同
         let lensDiameter = diameter * tuning.ringScale
         let radius = diameter / 2
         return ZStack {
-            // 外环：Metal 折射透镜（捕获可用时呈现折射 + 色散）
+            // 折射透镜（捕获可用时呈现折射 + 色散）
             GalaxyLensView()
                 .clipShape(Circle())
                 .frame(width: lensDiameter, height: lensDiameter)
                 .allowsHitTesting(false)
 
-            // 外环兜底：原生玻璃环（捕获不可用时仍有玻璃感）
+            // 玻璃兜底（捕获不可用时仍有玻璃感）
             Circle()
                 .fill(.clear)
                 .glassEffect(.clear, in: Circle())
                 .frame(width: lensDiameter, height: lensDiameter)
 
-            // 内核：原生磨砂材质（实时模糊背后桌面，零权限依赖）
+            // 内核磨砂材质 + 暗色偏置
             Circle()
                 .fill(.ultraThinMaterial)
                 .frame(width: diameter, height: diameter)
-            // 暗色偏置：中心轻、边缘重，保文字清晰同时有球体厚度感
             Circle()
                 .fill(
                     RadialGradient(
@@ -673,7 +701,7 @@ private struct GalaxyView: View {
                     )
                 )
                 .frame(width: diameter, height: diameter)
-            // 左上高光 + 边缘光：玻璃质感
+            // 左上高光 + 边缘光：玻璃质感（两种模式共用）
             Circle()
                 .fill(
                     RadialGradient(
@@ -700,12 +728,20 @@ private struct GalaxyView: View {
             Group {
                 if model.items.isEmpty {
                     ContentUnavailableView(
-                        model.source == .library ? "星图还是空的" : "暂无剪贴板文字",
+                        model.source == .library
+                            ? "星图还是空的"
+                            : model.source == .clipboard
+                                ? "暂无剪贴板文字"
+                                : refractionQuery.isEmpty ? "输入关键词检索" : "没有匹配的词条",
                         systemImage: "sparkles",
                         description: Text(
                             model.source == .library
                                 ? "保存一些文字后，它们会出现在这里。"
-                                : "复制文字后，它会出现在这里；图片和文件仍可在剪贴板历史中查看。"
+                                : model.source == .clipboard
+                                    ? "复制文字后，它会出现在这里；图片和文件仍可在剪贴板历史中查看。"
+                                    : refractionQuery.isEmpty
+                                        ? "在下方输入关键词，球面会显示词库中匹配的词条。"
+                                        : "换个关键词试试。"
                         )
                     )
                     .frame(maxWidth: diameter * 0.56)
@@ -739,11 +775,12 @@ private struct GalaxyView: View {
                 Spacer()
 
                 Picker("星图内容", selection: $model.source) {
+                    Text("折射").tag(GalaxySource.refraction)
                     Text("词库").tag(GalaxySource.library)
                     Text("剪贴板").tag(GalaxySource.clipboard)
                 }
                 .pickerStyle(.segmented)
-                .frame(width: 190)
+                .frame(width: 230)
                 .help("切换星图内容")
 
                 Button {
@@ -793,9 +830,81 @@ private struct GalaxyView: View {
                 }
             }
             selectionActions(item.entry)
-        } else {
+        } else if model.source != .refraction {
             hintBar
         }
+    }
+
+    /// 折射模式:球下方的词库检索框;聚焦时方向键组合仍可切换源
+    private var refractionSearchBar: some View {
+        HStack(spacing: 8) {
+            Image(systemName: "magnifyingglass")
+            TextField("输入关键词，检索词库（回车开始）", text: $refractionQuery)
+                .textFieldStyle(.plain)
+            if !refractionQuery.isEmpty {
+                Button {
+                    refractionQuery = ""
+                } label: {
+                    Image(systemName: "xmark.circle.fill")
+                        .foregroundStyle(.secondary)
+                }
+                .buttonStyle(.borderless)
+                .help("清空")
+            }
+        }
+        .font(.caption)
+        .padding(.horizontal, 14)
+        .padding(.vertical, 9)
+        .glassEffect(.regular, in: Capsule())
+        .frame(maxWidth: 340)
+    }
+
+    /// 源切换统一入口(三档固定顺序:折射→词库→剪贴板;边缘忽略),带旋转动效。
+    /// 由本地按键监听调用,覆盖球面/检索框(含输入法激活)等任意焦点状态
+    private func switchSource(forward: Bool) {
+        let order = GalaxySource.allCases
+        guard let index = order.firstIndex(of: model.source) else { return }
+        let next = index + (forward ? 1 : -1)
+        guard order.indices.contains(next) else { return }
+        model.pendingSourceSwitch = forward
+        model.source = order[next]
+    }
+
+    /// ⇧⌥/⇧⌘+方向键的本地事件监听:在按键派发到控件(含输入法)之前拦截,
+    /// 保证检索框聚焦时切换依然生效;星图关闭时移除(移除动作不在回调内执行)
+    private func installArrowSwitchMonitor() {
+        guard arrowSwitchMonitor == nil else { return }
+        arrowSwitchMonitor = NSEvent.addLocalMonitorForEvents(matching: .keyDown) { event in
+            let modifiers = event.modifierFlags
+            guard modifiers.contains(.shift),
+                  modifiers.contains(.option) || modifiers.contains(.command)
+            else { return event }
+            if event.keyCode == kVK_RightArrow || event.keyCode == kVK_LeftArrow {
+                MainActor.assumeIsolated {
+                    switchSource(forward: event.keyCode == kVK_RightArrow)
+                }
+                return nil // 已处理,不再派发给焦点控件
+            }
+            return event
+        }
+    }
+
+    private func removeArrowSwitchMonitor() {
+        if let monitor = arrowSwitchMonitor {
+            NSEvent.removeMonitor(monitor)
+        }
+        arrowSwitchMonitor = nil
+    }
+
+    private func refractionFilteredClips() -> [Clip] {
+        let term = refractionQuery.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !term.isEmpty else { return [] }
+        return store.clips.filter { $0.text.localizedCaseInsensitiveContains(term) }
+    }
+
+    private func applyRefractionQuery(_ query: String) {
+        guard model.source == .refraction else { return }
+        model.rebuild(from: refractionFilteredClips(), announceSampling: false)
     }
 
     private var hintBar: some View {

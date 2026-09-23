@@ -97,22 +97,17 @@ final class GalaxySceneView: SCNView {
     }
 
     override func keyDown(with event: NSEvent) {
-        // 选中词条后回车 → 进入编辑
+        // 回车:折射模式 → 聚焦检索框;其他模式 → 编辑选中词条
         if event.keyCode == kVK_Return || event.keyCode == kVK_ANSI_KeypadEnter {
-            interactionCoordinator?.editSelection()
+            if interactionCoordinator?.model?.source == .refraction {
+                interactionCoordinator?.focusSearchField()
+            } else {
+                interactionCoordinator?.editSelection()
+            }
             return
         }
-        // Shift+Option+←/→ → 词库球与剪贴板球切换
-        if event.modifierFlags.contains(.shift) && event.modifierFlags.contains(.option) {
-            if event.keyCode == kVK_RightArrow {
-                interactionCoordinator?.switchSource(forward: true)
-                return
-            }
-            if event.keyCode == kVK_LeftArrow {
-                interactionCoordinator?.switchSource(forward: false)
-                return
-            }
-        }
+        // Shift+Option/Command+←/→ 的源切换由 GalaxyView 的本地事件监听统一处理,
+        // 对球面、检索框(含输入法激活)等任意焦点状态一致生效
         super.keyDown(with: event)
     }
 
@@ -175,7 +170,7 @@ final class GalaxySceneCoordinator: NSObject {
         let node: SCNNode
     }
 
-    private weak var model: GalaxyModel?
+    weak var model: GalaxyModel?
     private weak var view: GalaxySceneView?
     private let scene = SCNScene()
     private let rotatingRoot = SCNNode()
@@ -352,17 +347,27 @@ final class GalaxySceneCoordinator: NSObject {
         model?.pendingEdit = item
     }
 
-    /// Shift+Option+→/← 在词库球与剪贴板球间切换(两个固定位置:词库在左、剪贴板在右);
-    /// 已在边缘时忽略;动画进行中忽略后续请求
-    func switchSource(forward: Bool) {
-        guard let model, !isSourceTransitioning else { return }
-        if forward, model.source == .clipboard { return }
-        if !forward, model.source == .library { return }
-        beginSpinTransition(forward: forward)
-        model.selectedItem = nil
-        // source 变化会驱动 SwiftUI 重建 items;动画期间到达的任何 update 都被挂起,
-        // 由动画回调统一用最新数据重建,消除时序竞争
-        model.source = forward ? .clipboard : .library
+    /// 折射模式下聚焦检索框:直接定位窗口内唯一的可编辑文本控件(SwiftUI TextField
+    /// 的宿主 NSTextField)并设为 first responder,同步完成、不依赖焦点接力
+    func focusSearchField() {
+        guard let model, model.source == .refraction,
+              let window = view?.window,
+              let field = firstEditableTextField(in: window.contentView)
+        else { return }
+        window.makeFirstResponder(field)
+    }
+
+    private func firstEditableTextField(in view: NSView?) -> NSTextField? {
+        guard let view else { return nil }
+        if let field = view as? NSTextField, field.isEditable {
+            return field
+        }
+        for subview in view.subviews {
+            if let found = firstEditableTextField(in: subview) {
+                return found
+            }
+        }
+        return nil
     }
 
     // MARK: - 源切换旋转更替(球壳圆形对称保持不动,动效仅在词条层)
