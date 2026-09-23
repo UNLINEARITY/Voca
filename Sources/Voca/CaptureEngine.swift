@@ -27,6 +27,11 @@ enum CaptureResult {
     case secureField
 }
 
+extension Notification.Name {
+    /// ⌘C 降级取词的模拟复制与剪贴板恢复已全部结束
+    static let simulatedCopyEnded = Notification.Name("VocaSimulatedCopyEnded")
+}
+
 /// 前台浏览器当前标签页 URL（Apple Events 查询；须在主线程调用）
 enum BrowserTabURL {
     /// bundleID → AppleScript 目标名（Chromium 系共用同一套字典；Firefox 无接口不收录）
@@ -172,6 +177,8 @@ final class CaptureEngine {
         let saved = pasteboard.snapshot()
         let changeCountBefore = pasteboard.changeCount
 
+        // 模拟复制与随后的恢复都不计入剪贴板历史(否则一次取词会多出两条假记录)
+        Self.isSimulatingCopy = true
         postCmdC()
 
         var changed = false
@@ -190,6 +197,9 @@ final class CaptureEngine {
 
         DispatchQueue.main.asyncAfter(deadline: .now() + 0.3) {
             pasteboard.restore(saved)
+            Self.isSimulatingCopy = false
+            // 通知监听方同步 changeCount 基准,恢复动作不会被当成新的复制
+            NotificationCenter.default.post(name: .simulatedCopyEnded, object: nil)
         }
         return text
     }

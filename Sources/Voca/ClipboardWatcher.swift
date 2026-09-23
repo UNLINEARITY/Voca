@@ -53,6 +53,9 @@ final class ClipboardWatcher: ObservableObject {
     private let store: ClipStore
     private var timer: Timer?
     private var lastChangeCount: Int
+    /// 最近一条文本记录的时间(同文本短窗防抖用)
+    private var lastTextEntryAt: Date?
+    private var simulatedCopyObserver: NSObjectProtocol?
     /// 浏览器 URL 查询串行队列：慢查询自然排队，不堆积并发子进程
     private let browserURLQueue = DispatchQueue(label: "local.voca.Voca.browser-url", qos: .utility)
 
@@ -64,7 +67,21 @@ final class ClipboardWatcher: ObservableObject {
         )
         lastChangeCount = NSPasteboard.general.changeCount
         entries = store.loadClipboardEntries()
+        // ⌘C 降级取词结束后同步基准,模拟复制与恢复都不进历史
+        simulatedCopyObserver = NotificationCenter.default.addObserver(
+            forName: .simulatedCopyEnded, object: nil, queue: .main
+        ) { [weak self] _ in
+            MainActor.assumeIsolated {
+                self?.lastChangeCount = NSPasteboard.general.changeCount
+            }
+        }
         if isEnabled { start() }
+    }
+
+    deinit {
+        if let observer = simulatedCopyObserver {
+            NotificationCenter.default.removeObserver(observer)
+        }
     }
 
     private func start() {
@@ -82,9 +99,14 @@ final class ClipboardWatcher: ObservableObject {
     }
 
     private func poll() {
-        guard isEnabled, !CaptureEngine.isSimulatingCopy else { return }
+        guard isEnabled else { return }
         let pasteboard = NSPasteboard.general
         let count = pasteboard.changeCount
+        if CaptureEngine.isSimulatingCopy {
+            // 模拟复制/恢复期间:跟随基准,不记录
+            lastChangeCount = count
+            return
+        }
         guard count != lastChangeCount else { return }
         lastChangeCount = count
 
@@ -97,13 +119,22 @@ final class ClipboardWatcher: ObservableObject {
 
         let app = NSWorkspace.shared.frontmostApplication
 
-        // 1) 文本：直接记录 + 持久化（不去重）；来自浏览器时后台补填当前标签页 URL
+        // 1) 文本：直接记录 + 持久化；来自浏览器时后台补填当前标签页 URL。
+        //    同一文本 2 秒内的重复写入(应用多阶段写剪贴板/连按 ⌘C)只记一次
         if let text = pasteboard.string(forType: .string)?
             .trimmingCharacters(in: .whitespacesAndNewlines), !text.isEmpty
         {
+            let trimmed = String(text.prefix(10_000))
+            if entries.first?.text == trimmed,
+               let lastAt = lastTextEntryAt,
+               Date().timeIntervalSince(lastAt) < 2
+            {
+                return
+            }
+            lastTextEntryAt = Date()
             let entry = ClipboardEntry(
                 id: UUID(),
-                text: String(text.prefix(10_000)),
+                text: trimmed,
                 image: nil,
                 fileNames: nil,
                 appName: app?.localizedName,
