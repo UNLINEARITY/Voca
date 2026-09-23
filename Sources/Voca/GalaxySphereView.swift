@@ -17,6 +17,7 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
 
 import AppKit
+import Carbon.HIToolbox
 import SceneKit
 import SwiftUI
 import simd
@@ -93,6 +94,15 @@ final class GalaxySceneView: SCNView {
         }
         mouseDownPoint = nil
         didDrag = false
+    }
+
+    override func keyDown(with event: NSEvent) {
+        // 选中词条后回车 → 进入编辑
+        if event.keyCode == kVK_Return || event.keyCode == kVK_ANSI_KeypadEnter {
+            interactionCoordinator?.editSelection()
+            return
+        }
+        super.keyDown(with: event)
     }
 
     override func scrollWheel(with event: NSEvent) {
@@ -317,6 +327,12 @@ final class GalaxySceneCoordinator: NSObject {
         model?.selectedItem = clipID.flatMap { id in
             latestItems.first { $0.clipId == id }
         }
+    }
+
+    /// 选中词条后按回车 → 发出编辑请求(GalaxyView 弹编辑面板;剪贴板条目无编辑界面,忽略)
+    func editSelection() {
+        guard let item = model?.selectedItem else { return }
+        model?.pendingEdit = item
     }
 
     private func configureScene() {

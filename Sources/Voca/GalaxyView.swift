@@ -83,7 +83,7 @@ enum GalaxySource: String, CaseIterable {
     case clipboard
 }
 
-enum GalaxyEntry {
+enum GalaxyEntry: Equatable {
     case library(Clip)
     case clipboard(ClipboardEntry)
 
@@ -109,7 +109,7 @@ enum GalaxyEntry {
     }
 }
 
-struct GalaxyItem {
+struct GalaxyItem: Equatable {
     static let maximumTextAngle: Float = 1.18
     static let fontAngleScale: CGFloat = 0.00325
 
@@ -154,6 +154,8 @@ final class GalaxyModel: ObservableObject {
 
     @Published private(set) var items: [GalaxyItem] = []
     @Published var selectedItem: GalaxyItem?
+    /// 双击词条发出的编辑请求(GalaxyView 监听后弹出编辑面板;剪贴板条目无编辑界面,忽略)
+    @Published var pendingEdit: GalaxyItem?
     @Published var source: GalaxySource = .library
     @Published var isTimelineVisible = false
     @Published var timelinePage = 0
@@ -465,114 +467,151 @@ private struct GalaxyView: View {
 
     var body: some View {
         GeometryReader { geometry in
-            let radius = min(geometry.size.width, geometry.size.height) * tuning.sphereScale
-
-            ZStack {
-                sphere(diameter: radius * 2)
-                    .position(x: geometry.size.width / 2, y: geometry.size.height / 2)
-
-                VStack {
-                    topBar
-                    Spacer()
-                    selectionDetail(availableWidth: geometry.size.width)
-                }
-                .padding(20)
-
-                if showTuning {
-                    tuningPanel
-                        .padding(.leading, 24)
-                        .frame(
-                            maxWidth: .infinity,
-                            maxHeight: .infinity,
-                            alignment: .topLeading
-                        )
-                        .padding(.top, 70)
-                }
-
-                if let item = model.selectedItem {
-                    selectionOrbit(
-                        item.entry,
-                        sphereDiameter: radius * 2,
-                        canvasSize: geometry.size
-                    )
-                    .transition(selectionTransition)
-                }
-            }
-            .animation(selectionAnimation, value: model.selectedItem?.clipId)
-            .animation(selectionAnimation, value: model.isTimelineVisible)
-            .animation(selectionAnimation, value: model.timelinePage)
+            galaxyContent(geometry)
         }
         .background(.clear)
-        .onChange(of: tuning.distribution) { _, _ in
-            model.relayout()
-        }
-        .onChange(of: model.source) { _, source in
-            model.selectedItem = nil
-            if source == .library {
-                model.rebuild(from: store.clips)
-            } else {
-                model.rebuild(fromClipboard: watcher.entries)
-            }
-        }
-        .onChange(of: watcher.entries) { _, entries in
-            if model.source == .clipboard {
-                model.rebuild(fromClipboard: entries)
-            }
-        }
-        .onChange(of: model.selectedItem?.clipId) { _, _ in
-            if let item = model.selectedItem, case .library(let clip) = item.entry {
-                timelineEvents = store.events(for: clip)
-            } else {
-                timelineEvents = []
-            }
-            model.timelinePageCount = max(1, (timelineEvents.count + 5) / 6)
-            model.isTimelineVisible = false
-            model.timelinePage = 0
-            selectedTimelineIndex = 0
-            if model.selectedItem != nil {
-                showTuning = false
-            }
-        }
-        .onChange(of: model.timelinePage) { _, _ in
-            selectedTimelineIndex = 0
-        }
+        .onChange(of: tuning.distribution) { _, _ in handleDistributionChange() }
+        .onChange(of: model.source) { _, source in handleSourceChange(source) }
+        .onChange(of: watcher.entries) { _, entries in handleClipboardEntries(entries) }
+        .onChange(of: model.selectedItem?.clipId) { _, _ in handleSelectionChange() }
+        .onChange(of: model.timelinePage) { _, _ in selectedTimelineIndex = 0 }
+        .onChange(of: model.pendingEdit) { _, item in handlePendingEdit(item) }
         .sheet(item: $editingClip) { clip in
-            EditClipSheet(clip: clip) { text, note in
-                store.update(clip, text: text, note: note)
-                model.rebuild(from: store.clips)
-                if let id = clip.id {
-                    model.selectedItem = model.items.first { $0.clipId == id }
-                }
-            }
+            editSheet(for: clip)
         }
         .confirmationDialog(
             deletingClipboard ? "移除这条剪贴板历史？" : "删除这条词库记录？",
-            isPresented: .init(
-                get: { deletingEntry != nil },
-                set: { if !$0 { deletingEntry = nil } }
-            ),
+            isPresented: deletingEntryBinding,
             titleVisibility: .visible
         ) {
-            Button(
-                deletingClipboard ? "移除剪贴板记录" : "删除词库记录（不可恢复）",
-                role: .destructive
-            ) {
-                deleteSelectedEntry()
-            }
-            Button("取消", role: .cancel) {
-                deletingEntry = nil
-            }
+            deleteDialogActions
         } message: {
-            Text(deletingClipboard
-                ? "仅从剪贴板历史移除，不影响已入库的词条。"
-                : "将永久删除该词库记录及其全部时间线事件，不影响剪贴板历史。")
+            deleteDialogMessage
         }
+    }
+
+    /// 星图主体(从 body 抽出,避免顶层表达式过长导致类型检查超时)
+    private func galaxyContent(_ geometry: GeometryProxy) -> some View {
+        let radius = min(geometry.size.width, geometry.size.height) * tuning.sphereScale
+
+        return ZStack {
+            sphere(diameter: radius * 2)
+                .position(x: geometry.size.width / 2, y: geometry.size.height / 2)
+
+            VStack {
+                topBar
+                Spacer()
+                selectionDetail(availableWidth: geometry.size.width)
+            }
+            .padding(20)
+
+            if showTuning {
+                tuningPanel
+                    .padding(.leading, 24)
+                    .frame(
+                        maxWidth: .infinity,
+                        maxHeight: .infinity,
+                        alignment: .topLeading
+                    )
+                    .padding(.top, 70)
+            }
+
+            if let item = model.selectedItem {
+                selectionOrbit(
+                    item.entry,
+                    sphereDiameter: radius * 2,
+                    canvasSize: geometry.size
+                )
+                .transition(selectionTransition)
+            }
+        }
+        .animation(selectionAnimation, value: model.selectedItem?.clipId)
+        .animation(selectionAnimation, value: model.isTimelineVisible)
+        .animation(selectionAnimation, value: model.timelinePage)
     }
 
     private var deletingClipboard: Bool {
         guard let deletingEntry else { return false }
         if case .clipboard = deletingEntry { return true }
         return false
+    }
+
+    private func handleDistributionChange() {
+        model.relayout()
+    }
+
+    private func handleSourceChange(_ source: GalaxySource) {
+        model.selectedItem = nil
+        if source == .library {
+            model.rebuild(from: store.clips)
+        } else {
+            model.rebuild(fromClipboard: watcher.entries)
+        }
+    }
+
+    private func handleClipboardEntries(_ entries: [ClipboardEntry]) {
+        if model.source == .clipboard {
+            model.rebuild(fromClipboard: entries)
+        }
+    }
+
+    private func handleSelectionChange() {
+        if let item = model.selectedItem, case .library(let clip) = item.entry {
+            timelineEvents = store.events(for: clip)
+        } else {
+            timelineEvents = []
+        }
+        model.timelinePageCount = max(1, (timelineEvents.count + 5) / 6)
+        model.isTimelineVisible = false
+        model.timelinePage = 0
+        selectedTimelineIndex = 0
+        if model.selectedItem != nil {
+            showTuning = false
+        }
+    }
+
+    private func editSheet(for clip: Clip) -> some View {
+        EditClipSheet(clip: clip) { text, note in
+            store.update(clip, text: text, note: note)
+            model.rebuild(from: store.clips)
+            if let id = clip.id {
+                model.selectedItem = model.items.first { $0.clipId == id }
+            }
+        }
+    }
+
+    private var deletingEntryBinding: Binding<Bool> {
+        Binding(
+            get: { deletingEntry != nil },
+            set: { if !$0 { deletingEntry = nil } }
+        )
+    }
+
+    @ViewBuilder
+    private var deleteDialogActions: some View {
+        Button(
+            deletingClipboard ? "移除剪贴板记录" : "删除词库记录（不可恢复）",
+            role: .destructive
+        ) {
+            deleteSelectedEntry()
+        }
+        Button("取消", role: .cancel) {
+            deletingEntry = nil
+        }
+    }
+
+    private var deleteDialogMessage: Text {
+        Text(
+            deletingClipboard
+                ? "仅从剪贴板历史移除，不影响已入库的词条。"
+                : "将永久删除该词库记录及其全部时间线事件，不影响剪贴板历史。")
+    }
+
+    /// 双击词条 → 弹出编辑面板(剪贴板条目无编辑界面,忽略)
+    private func handlePendingEdit(_ item: GalaxyItem?) {
+        model.pendingEdit = nil
+        guard let item, case .library(let clip) = item.entry else { return }
+        editingClip = clip
     }
 
     private func deleteSelectedEntry() {

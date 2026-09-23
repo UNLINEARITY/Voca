@@ -32,12 +32,29 @@ final class AppModel: ObservableObject {
     let store: ClipStore
     let clipboardWatcher: ClipboardWatcher
 
+    /// Dock 图标偏好存储键
+    static let showsDockIconKey = "showsDockIcon"
+
+    /// 在 Dock 显示应用图标;关闭只隐藏 Dock 图标,菜单栏与后台运行不受影响,不会退出
+    @Published var showsDockIcon: Bool {
+        didSet {
+            guard oldValue != showsDockIcon else { return }
+            UserDefaults.standard.set(showsDockIcon, forKey: Self.showsDockIconKey)
+            NSApp.setActivationPolicy(showsDockIcon ? .regular : .accessory)
+        }
+    }
+
     private init() {
         do {
             store = try ClipStore()
         } catch {
             fatalError("Voca: 无法打开数据库：\(error)")
         }
+        _showsDockIcon = Published(
+            initialValue: UserDefaults.standard.object(forKey: Self.showsDockIconKey) == nil
+                ? false
+                : UserDefaults.standard.bool(forKey: Self.showsDockIconKey)
+        )
         clipboardWatcher = ClipboardWatcher(store: store)
     }
 
@@ -81,6 +98,11 @@ final class AppModel: ObservableObject {
     }
 }
 
+extension Notification.Name {
+    /// 点击 Dock 图标且无可见窗口时,请求打开记录窗口
+    static let openRecordsWindow = Notification.Name("VocaOpenRecordsWindow")
+}
+
 final class AppDelegate: NSObject, NSApplicationDelegate {
     func applicationDidFinishLaunching(_ notification: Notification) {
         KeyboardShortcuts.onKeyUp(for: .saveSelection) {
@@ -94,6 +116,18 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             GalaxyWindowController.shared.open()
         }
     }
+
+    /// Dock 模式下点击 Dock 图标：无可见窗口时激活并打开记录窗口
+    func applicationShouldHandleReopen(
+        _ application: NSApplication,
+        hasVisibleWindows flag: Bool
+    ) -> Bool {
+        if !flag {
+            NSApp.activate(ignoringOtherApps: true)
+            NotificationCenter.default.post(name: .openRecordsWindow, object: nil)
+        }
+        return true
+    }
 }
 
 @main
@@ -102,7 +136,10 @@ struct VocaApp: App {
     @StateObject private var model = AppModel.shared
 
     init() {
-        NSApplication.shared.setActivationPolicy(.accessory)
+        // 启动即恢复 Dock 图标偏好(LSUIElement=true 仅决定初始形态,运行时可切换)
+        let dockEnabled = UserDefaults.standard.object(forKey: AppModel.showsDockIconKey) != nil
+            && UserDefaults.standard.bool(forKey: AppModel.showsDockIconKey)
+        NSApplication.shared.setActivationPolicy(dockEnabled ? .regular : .accessory)
         // 首次启动给默认快捷键，用户可随时在菜单栏改
         if KeyboardShortcuts.getShortcut(for: .saveSelection) == nil {
             KeyboardShortcuts.setShortcut(
@@ -149,6 +186,7 @@ struct VocaApp: App {
 struct MenuBarView: View {
     @EnvironmentObject private var store: ClipStore
     @EnvironmentObject private var watcher: ClipboardWatcher
+    @ObservedObject private var model = AppModel.shared
     @Environment(\.openWindow) private var openWindow
 
     var body: some View {
@@ -170,6 +208,10 @@ struct MenuBarView: View {
 
             Toggle(isOn: $watcher.isEnabled) {
                 Label("记录剪贴板历史", systemImage: "doc.on.clipboard")
+            }
+
+            Toggle(isOn: $model.showsDockIcon) {
+                Label("在 Dock 显示图标", systemImage: "dock.rectangle")
             }
 
             Divider()
@@ -206,6 +248,9 @@ struct MenuBarView: View {
         }
         .padding(12)
         .frame(width: 260)
+        .onReceive(NotificationCenter.default.publisher(for: .openRecordsWindow)) { _ in
+            openWindow(id: "records")
+        }
     }
 }
 
@@ -240,6 +285,10 @@ struct RecordsView: View {
                             onTimeline: { timelineClip = clip },
                             onDelete: { deletingClip = clip }
                         )
+                        .contentShape(Rectangle())
+                        .onTapGesture(count: 2) {
+                            editingClip = clip
+                        }
                     }
                     .listStyle(.inset)
                 }
