@@ -137,7 +137,11 @@ struct GalaxyItem: Equatable {
         let font = NSFont.systemFont(ofSize: fontSize, weight: .medium)
         let lineHeight = font.ascender - font.descender + font.leading
         let maximumWidth = CGFloat(Self.maximumTextAngle / angularHeight) * lineHeight
-        let attributes: [NSAttributedString.Key: Any] = [.font: font]
+        // 与渲染保持一致的字距,截断测量才准确
+        let attributes: [NSAttributedString.Key: Any] = [
+            .font: font,
+            .kern: fontSize * 0.02,
+        ]
         if (flattened as NSString).size(withAttributes: attributes).width <= maximumWidth {
             return flattened
         }

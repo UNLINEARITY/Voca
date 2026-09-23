@@ -691,33 +691,59 @@ final class GalaxySceneCoordinator: NSObject {
         return material
     }
 
+    /// 球面文字位图:纯白填充 + 轻投影(无描边,描边与投影溢出会造成字符粘连);
+    /// 按屏幕原生像素密度显式渲染,避免 lockFocus 的低密度位图被上采样发糊
     private func textImage(_ text: String, fontSize: CGFloat) -> NSImage {
         let font = NSFont.systemFont(ofSize: fontSize, weight: .medium)
         let shadow = NSShadow()
-        shadow.shadowColor = NSColor.black.withAlphaComponent(0.78)
-        shadow.shadowBlurRadius = 2
+        shadow.shadowColor = NSColor.black.withAlphaComponent(0.5)
+        shadow.shadowBlurRadius = 3
         shadow.shadowOffset = CGSize(width: 0, height: -1)
         let attributes: [NSAttributedString.Key: Any] = [
             .font: font,
-            .foregroundColor: NSColor(calibratedRed: 0.98, green: 0.96, blue: 0.89, alpha: 1),
-            .strokeColor: NSColor(calibratedWhite: 0.08, alpha: 0.94),
-            .strokeWidth: -4.5,
+            .foregroundColor: NSColor.white,
             .shadow: shadow,
+            .kern: fontSize * 0.02, // 轻微字距,缓解相邻字符的视觉连接
         ]
         let measuredSize = (text as NSString).size(withAttributes: attributes)
         let padding: CGFloat = 8
-        let image = NSImage(
-            size: CGSize(
-                width: ceil(measuredSize.width + padding * 2),
-                height: ceil(measuredSize.height + padding * 2)
-            )
+        let logicalSize = CGSize(
+            width: ceil(measuredSize.width + padding * 2),
+            height: ceil(measuredSize.height + padding * 2)
         )
-        image.lockFocus()
+        let scale = NSScreen.main?.backingScaleFactor ?? 2
+        guard let rep = NSBitmapImageRep(
+            bitmapDataPlanes: nil,
+            pixelsWide: Int(logicalSize.width * scale),
+            pixelsHigh: Int(logicalSize.height * scale),
+            bitsPerSample: 8,
+            samplesPerPixel: 4,
+            hasAlpha: true,
+            isPlanar: false,
+            colorSpaceName: .deviceRGB,
+            bytesPerRow: 0,
+            bitsPerPixel: 0
+        ) else {
+            let fallback = NSImage(size: logicalSize)
+            fallback.lockFocus()
+            (text as NSString).draw(
+                at: CGPoint(x: padding, y: padding),
+                withAttributes: attributes
+            )
+            fallback.unlockFocus()
+            return fallback
+        }
+        rep.size = logicalSize
+        NSGraphicsContext.saveGraphicsState()
+        NSGraphicsContext.current = NSGraphicsContext(bitmapImageRep: rep)
         (text as NSString).draw(
             at: CGPoint(x: padding, y: padding),
             withAttributes: attributes
         )
-        image.unlockFocus()
+        NSGraphicsContext.current = nil
+        NSGraphicsContext.restoreGraphicsState()
+        let image = NSImage(size: logicalSize)
+        image.addRepresentation(rep)
         return image
     }
 
