@@ -44,7 +44,7 @@ open build/Voca.app # 启动（菜单栏会出现 ❝ 图标）
 - **位置**：`~/Library/Application Support/Voca/voca.sqlite`（单文件）
 - **备份**：拷贝这一个文件即可
 - **查看**：任何 SQLite 工具都能直接打开（如 `sqlite3`、DB Browser for SQLite）
-- **结构**：`clips` 表（正式词库，含 count/lastSeenAt 合并计数）+ `clip_events` 表（每次保存的时间线事件）+ `clipboard_entries` 表（剪贴板文本历史，≤200 条，可在历史页清空）
+- **结构**：`clips` 表（正式词库，含 count/lastSeenAt 合并计数）+ `clip_events` 表（每次保存的时间线事件）+ `clipboard_entries` 表（剪贴板文本历史，无上限保留，启动载入最近 2000 条，可在历史页清空）
 
 ## 工作原理
 
@@ -61,7 +61,7 @@ open build/Voca.app # 启动（菜单栏会出现 ❝ 图标）
 
 ### 剪贴板历史（默认开启，可在菜单栏 ❝ 关闭）
 
-- 每 0.5 秒轮询剪贴板变化；**文本条目最多 200 条，持久化在 `clipboard_entries` 表**，重启不丢
+- 每 0.5 秒轮询剪贴板变化；**文本条目无上限持久化在 `clipboard_entries` 表（启动载入最近 2000 条）**，重启不丢
 - 图片/文件复制也会显示（仅本次会话，退出即清，不可入库）
 - 密码管理器标记的保密条目（ConcealedType）自动跳过；重复内容各记一条（不去重）
 - **手动点 ➕ 才进入词库**，入库后记录仍保留在历史中，入库时间 = 复制时间；划词取词模拟 ⌘C 期间自动暂停监听，不污染历史

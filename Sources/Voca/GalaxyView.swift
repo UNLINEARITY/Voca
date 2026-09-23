@@ -194,9 +194,17 @@ final class GalaxyModel: ObservableObject {
         } else {
             selectedID = nil
         }
-        makeItems(from: entries.compactMap { entry in
-            entry.text == nil ? nil : GalaxyEntry.clipboard(entry)
-        })
+        let textEntries = entries.compactMap { entry in
+            entry.text == nil ? nil : entry
+        }
+        let sampled: [ClipboardEntry]
+        if textEntries.count > Self.maxItems {
+            sampled = Array(textEntries.prefix(Self.maxItems))
+            ToastController.shared.show("星图显示前 \(Self.maxItems) 条（按最近复制）")
+        } else {
+            sampled = textEntries
+        }
+        makeItems(from: sampled.map(GalaxyEntry.clipboard))
         selectedItem = items.first { item in
             if case .clipboard(let entry) = item.entry { return entry.id == selectedID }
             return false

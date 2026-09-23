@@ -421,11 +421,16 @@ final class ClipStore: ObservableObject {
 
     // MARK: - 剪贴板历史持久化（仅文本条目）
 
-    func loadClipboardEntries() -> [ClipboardEntry] {
+    /// 启动载入最近的历史（新复制内容即时追加，不经过此方法）
+    /// limit：载入条数，默认为下方常量
+    static let clipboardLoadLimit = 2000
+
+    func loadClipboardEntries(limit: Int = ClipStore.clipboardLoadLimit) -> [ClipboardEntry] {
         let rows = (try? dbQueue.read { db in
             try Row.fetchAll(
                 db,
-                sql: "SELECT id, text, appName, appBundleID, url, date FROM clipboard_entries ORDER BY date DESC LIMIT 200"
+                sql: "SELECT id, text, appName, appBundleID, url, date FROM clipboard_entries ORDER BY date DESC LIMIT ?",
+                arguments: [limit]
             )
         }) ?? []
         return rows.compactMap { row in
@@ -451,7 +456,7 @@ final class ClipStore: ObservableObject {
         }
     }
 
-    /// 直接插入新条目（不去重），并维持最多 200 条
+    /// 直接插入新条目（不去重）；文本历史无上限保留，由用户自行清理
     func saveClipboardEntry(_ entry: ClipboardEntry) {
         guard let text = entry.text else { return }
         do {
@@ -459,9 +464,6 @@ final class ClipStore: ObservableObject {
                 try db.execute(
                     sql: "INSERT INTO clipboard_entries (id, text, appName, appBundleID, url, date) VALUES (?, ?, ?, ?, ?, ?)",
                     arguments: [entry.id.uuidString, text, entry.appName, entry.appBundleID, entry.url, entry.date]
-                )
-                try db.execute(
-                    sql: "DELETE FROM clipboard_entries WHERE id NOT IN (SELECT id FROM clipboard_entries ORDER BY date DESC LIMIT 200)"
                 )
             }
         } catch {

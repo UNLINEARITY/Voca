@@ -37,10 +37,9 @@ struct ClipboardEntry: Identifiable, Equatable {
     }
 }
 
-/// 剪贴板监听：文本条目持久化（去重置顶，≤200 条）；图片/文件仅内存展示
+/// 剪贴板监听：文本条目持久化（不去重，无上限保留；启动载入最近 2000 条）；图片/文件仅会话内展示
 @MainActor
 final class ClipboardWatcher: ObservableObject {
-    static let maxEntries = 200
     private static let defaultsKey = "clipboardWatcherEnabled"
 
     @Published private(set) var entries: [ClipboardEntry] = []
@@ -113,7 +112,6 @@ final class ClipboardWatcher: ObservableObject {
                 date: Date()
             )
             entries.insert(entry, at: 0)
-            trimIfNeeded()
             store.saveClipboardEntry(entry)
             resolveBrowserURL(for: entry, bundleID: app?.bundleIdentifier)
             return
@@ -158,7 +156,6 @@ final class ClipboardWatcher: ObservableObject {
 
     private func appendEphemeral(_ entry: ClipboardEntry) {
         entries.insert(entry, at: 0)
-        trimIfNeeded()
     }
 
     /// 后台查询浏览器标签页 URL，完成后回主线程补填该条记录（内存 + 持久层）。
@@ -178,12 +175,6 @@ final class ClipboardWatcher: ObservableObject {
         guard let index = entries.firstIndex(where: { $0.id == id }) else { return }
         entries[index].url = url
         store.updateClipboardEntryURL(id: id, url: url)
-    }
-
-    private func trimIfNeeded() {
-        if entries.count > Self.maxEntries {
-            entries.removeLast(entries.count - Self.maxEntries)
-        }
     }
 
     // MARK: - 操作
