@@ -29,12 +29,25 @@ enum WorkspaceTab: String, CaseIterable, Identifiable {
     var galaxySource: GalaxySource { self == .library ? .library : .clipboard }
 }
 
+private enum WorkspaceDestination: String {
+    case galaxy
+    case library
+    case clipboard
+}
+
 @MainActor
 final class WorkspaceNavigation: ObservableObject {
     static let shared = WorkspaceNavigation()
 
-    @Published private(set) var tab: WorkspaceTab = .library
-    @Published private(set) var movingRight = true
+    private static let destinationKey = "workspaceLastDestination"
+    private static let panelTabKey = "workspaceLastPanelTab"
+
+    @Published private(set) var tab = WorkspaceTab(
+        rawValue: UserDefaults.standard.string(forKey: panelTabKey) ?? ""
+    ) ?? .library
+    private var lastDestination = WorkspaceDestination(
+        rawValue: UserDefaults.standard.string(forKey: destinationKey) ?? ""
+    ) ?? .galaxy
     private var panelWindow: NSWindow?
     private var transitionWindow: NSWindow?
     private var isTransitioning = false
@@ -55,6 +68,7 @@ final class WorkspaceNavigation: ObservableObject {
         } else {
             let window = ensurePanelWindow()
             window.makeKeyAndOrderFront(nil)
+            focusPanelContainer()
             NSApp.activate(ignoringOtherApps: true)
         }
     }
@@ -71,11 +85,34 @@ final class WorkspaceNavigation: ObservableObject {
         }
     }
 
+    func toggleLastWorkspace() {
+        guard !isTransitioning else { return }
+        let galaxy = GalaxyWindowController.shared
+        if galaxy.isActive {
+            galaxy.close()
+        } else if panelWindow?.isKeyWindow == true, NSApp.isActive {
+            panelWindow?.orderOut(nil)
+        } else {
+            switch lastDestination {
+            case .galaxy: galaxy.open()
+            case .library: openPanel(.library)
+            case .clipboard: openPanel(.clipboard)
+            }
+        }
+    }
+
+    func noteGalaxyOpened() {
+        lastDestination = .galaxy
+        UserDefaults.standard.set(lastDestination.rawValue, forKey: Self.destinationKey)
+    }
+
     func setTab(_ newTab: WorkspaceTab) {
+        lastDestination = newTab == .library ? .library : .clipboard
+        UserDefaults.standard.set(lastDestination.rawValue, forKey: Self.destinationKey)
+        UserDefaults.standard.set(newTab.rawValue, forKey: Self.panelTabKey)
         guard newTab != tab else { return }
-        movingRight = newTab == .clipboard
         tab = newTab
-        panelWindow?.makeFirstResponder(nil)
+        focusPanelContainer()
     }
 
     func openGalaxyForPanel() {
@@ -95,11 +132,16 @@ final class WorkspaceNavigation: ObservableObject {
         )
         window.title = "Voca"
         window.identifier = NSUserInterfaceItemIdentifier("voca.workspace")
-        window.contentView = NSHostingView(rootView: content)
+        window.contentView = WorkspaceHostingView(rootView: content)
         window.isReleasedWhenClosed = false
         window.center()
         panelWindow = window
         return window
+    }
+
+    private func focusPanelContainer() {
+        guard let panelWindow, let contentView = panelWindow.contentView else { return }
+        panelWindow.makeFirstResponder(contentView)
     }
 
     private func handleArrow(_ event: NSEvent) -> Bool {
@@ -162,6 +204,7 @@ final class WorkspaceNavigation: ObservableObject {
         } else {
             panel.alphaValue = 0
             panel.makeKeyAndOrderFront(nil)
+            focusPanelContainer()
             NSApp.activate(ignoringOtherApps: true)
         }
 
@@ -185,6 +228,7 @@ final class WorkspaceNavigation: ObservableObject {
                 } else {
                     galaxy.close()
                     panel.makeKeyAndOrderFront(nil)
+                    self.focusPanelContainer()
                 }
                 self.transitionWindow?.close()
                 self.transitionWindow = nil
@@ -253,6 +297,10 @@ final class WorkspaceNavigation: ObservableObject {
     }
 }
 
+private final class WorkspaceHostingView<Content: View>: NSHostingView<Content> {
+    override var acceptsFirstResponder: Bool { true }
+}
+
 private struct WorkspacePanelView: View {
     @ObservedObject private var navigation = WorkspaceNavigation.shared
 
@@ -286,25 +334,12 @@ private struct WorkspacePanelView: View {
 
             Divider()
 
-            ZStack {
-                if navigation.tab == .library {
-                    RecordsView()
-                        .transition(contentTransition)
-                } else {
-                    ClipboardHistoryView()
-                        .transition(contentTransition)
-                }
+            if navigation.tab == .library {
+                RecordsView()
+            } else {
+                ClipboardHistoryView()
             }
-            .animation(.easeInOut(duration: 0.18), value: navigation.tab)
         }
         .frame(minWidth: 480, minHeight: 360)
-    }
-
-    private var contentTransition: AnyTransition {
-        let offset: CGFloat = navigation.movingRight ? 10 : -10
-        return .asymmetric(
-            insertion: .offset(x: offset).combined(with: .opacity),
-            removal: .offset(x: -offset).combined(with: .opacity)
-        )
     }
 }

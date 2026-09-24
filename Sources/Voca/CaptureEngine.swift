@@ -97,11 +97,30 @@ final class CaptureEngine {
 
     /// ⌘C 降级进行中：剪贴板监听应暂停，避免记录我们模拟的复制与恢复动作
     static var isSimulatingCopy: Bool {
-        get { simLock.lock(); defer { simLock.unlock() }; return _isSimulatingCopy }
-        set { simLock.lock(); defer { simLock.unlock() }; _isSimulatingCopy = newValue }
+        simLock.lock(); defer { simLock.unlock() }
+        return _isSimulatingCopy
     }
     private static let simLock = NSLock()
     private static var _isSimulatingCopy = false
+
+    static func beginSimulatedCopy() -> Bool {
+        simLock.lock(); defer { simLock.unlock() }
+        guard !_isSimulatingCopy else { return false }
+        _isSimulatingCopy = true
+        return true
+    }
+
+    static func endSimulatedCopy(recordCurrent: Bool? = nil) {
+        simLock.lock()
+        _isSimulatingCopy = false
+        simLock.unlock()
+        guard let recordCurrent else { return }
+        NotificationCenter.default.post(
+            name: .simulatedCopyEnded,
+            object: nil,
+            userInfo: ["recordCurrent": recordCurrent]
+        )
+    }
 
     var isTrusted: Bool { AXIsProcessTrusted() }
 
@@ -173,13 +192,20 @@ final class CaptureEngine {
     // MARK: - ⌘C 降级路径
 
     private func copyFallback() -> String? {
-        let pasteboard = NSPasteboard.general
+        copyFallback(on: .general, postCopy: postCmdC)
+    }
+
+    func copyFallback(on pasteboard: NSPasteboard, postCopy: () -> Void) -> String? {
+        guard Self.beginSimulatedCopy() else { return nil }
+        var restorationScheduled = false
+        defer {
+            if !restorationScheduled { Self.endSimulatedCopy() }
+        }
         let saved = pasteboard.snapshot()
         let changeCountBefore = pasteboard.changeCount
 
         // 模拟复制与随后的恢复都不计入剪贴板历史(否则一次取词会多出两条假记录)
-        Self.isSimulatingCopy = true
-        postCmdC()
+        postCopy()
 
         var changed = false
         for _ in 0..<40 { // 最多等待 400ms
@@ -191,16 +217,17 @@ final class CaptureEngine {
         }
 
         // 只有剪贴板真的变化了才读取，避免误收用户剪贴板里的旧内容
-        guard changed, let text = pasteboard.string(forType: .string) else {
-            return nil
-        }
+        guard changed else { return nil }
+        let text = pasteboard.string(forType: .string)
+        let simulatedChangeCount = pasteboard.changeCount
 
         DispatchQueue.main.asyncAfter(deadline: .now() + 0.3) {
-            pasteboard.restore(saved)
-            Self.isSimulatingCopy = false
-            // 通知监听方同步 changeCount 基准,恢复动作不会被当成新的复制
-            NotificationCenter.default.post(name: .simulatedCopyEnded, object: nil)
+            let userCopiedSince = pasteboard.changeCount != simulatedChangeCount
+            if !userCopiedSince { pasteboard.restore(saved) }
+            // 用户在等待恢复期间又复制时，不覆盖其新内容，并交给监听器补记。
+            Self.endSimulatedCopy(recordCurrent: userCopiedSince)
         }
+        restorationScheduled = true
         return text
     }
 
@@ -240,7 +267,6 @@ private extension NSPasteboard {
     }
 
     func restore(_ snapshot: [ItemSnapshot]) {
-        guard !snapshot.isEmpty else { return }
         clearContents()
         for entry in snapshot {
             let item = NSPasteboardItem()

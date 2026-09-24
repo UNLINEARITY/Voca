@@ -23,6 +23,7 @@ import UniformTypeIdentifiers
 
 extension KeyboardShortcuts.Name {
     static let saveSelection = Self("saveSelection")
+    // 保留旧标识，避免重置用户已录制的工作区快捷键。
     static let openGalaxy = Self("openGalaxy")
 }
 
@@ -134,7 +135,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             AppModel.shared.handleHotkey()
         }
         KeyboardShortcuts.onKeyUp(for: .openGalaxy) {
-            WorkspaceNavigation.shared.toggleGalaxy()
+            WorkspaceNavigation.shared.toggleLastWorkspace()
         }
         // 调试/自动化入口：`open Voca.app --args --galaxy` 启动即打开星图
         if CommandLine.arguments.contains("--galaxy") {
@@ -239,7 +240,7 @@ struct MenuBarView: View {
             Divider()
 
             KeyboardShortcuts.Recorder("保存快捷键：", name: .saveSelection)
-            KeyboardShortcuts.Recorder("星图快捷键：", name: .openGalaxy)
+            KeyboardShortcuts.Recorder("工作区快捷键：", name: .openGalaxy)
 
             Toggle(isOn: $model.threeFingerSaveEnabled) {
                 Label("三指下滑保存（实验性）", systemImage: "hand.draw")
@@ -372,7 +373,10 @@ struct RecordsView: View {
                 }
             }
             .onAppear {
-                store.reload(search: search)
+                store.reloadAsync(search: search)
+            }
+            .onDisappear {
+                searchReloadTask?.cancel()
             }
             .sheet(item: $editingClip) { clip in
                 EditClipSheet(clip: clip) { text, note in

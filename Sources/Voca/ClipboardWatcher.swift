@@ -70,9 +70,13 @@ final class ClipboardWatcher: ObservableObject {
         // ⌘C 降级取词结束后同步基准,模拟复制与恢复都不进历史
         simulatedCopyObserver = NotificationCenter.default.addObserver(
             forName: .simulatedCopyEnded, object: nil, queue: .main
-        ) { [weak self] _ in
+        ) { [weak self] notification in
             MainActor.assumeIsolated {
-                self?.lastChangeCount = NSPasteboard.general.changeCount
+                if notification.userInfo?["recordCurrent"] as? Bool == true {
+                    self?.poll(force: true)
+                } else {
+                    self?.lastChangeCount = NSPasteboard.general.changeCount
+                }
             }
         }
         if isEnabled { start() }
@@ -98,16 +102,15 @@ final class ClipboardWatcher: ObservableObject {
         timer = nil
     }
 
-    private func poll() {
+    private func poll(force: Bool = false) {
         guard isEnabled else { return }
         let pasteboard = NSPasteboard.general
         let count = pasteboard.changeCount
         if CaptureEngine.isSimulatingCopy {
-            // 模拟复制/恢复期间:跟随基准,不记录
-            lastChangeCount = count
+            // 模拟复制/恢复期间先不推进基准；结束时再决定同步或补记用户的新复制。
             return
         }
-        guard count != lastChangeCount else { return }
+        guard force || count != lastChangeCount else { return }
         lastChangeCount = count
 
         // 密码管理器约定：带 ConcealedType 标记的保密条目不记录

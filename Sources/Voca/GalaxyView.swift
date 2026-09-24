@@ -426,6 +426,7 @@ final class GalaxyWindowController {
         window.makeKeyAndOrderFront(nil)
         NSApp.activate(ignoringOtherApps: true)
         setGalaxyRendering(paused: false, in: window.contentView)
+        WorkspaceNavigation.shared.noteGalaxyOpened()
     }
 
     func close() {
