@@ -108,9 +108,9 @@ final class AppModel: ObservableObject {
                 )
                 let suffix = appName.map { " · 来自 \($0)" } ?? ""
                 if clip.count > 1 {
-                    ToastController.shared.show("第 \(clip.count) 次记录，已置顶\(suffix)")
+                    ToastController.shared.showSaved("第 \(clip.count) 次记录，已置顶\(suffix)")
                 } else {
-                    ToastController.shared.show("已保存\(suffix)")
+                    ToastController.shared.showSaved("已保存\(suffix)")
                 }
             } catch {
                 ToastController.shared.show("保存失败：\(error.localizedDescription)")

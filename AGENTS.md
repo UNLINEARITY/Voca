@@ -35,7 +35,7 @@ A completed build must contain zero errors and zero warnings.
 | `Sources/Voca/TrackpadGestureMonitor.swift` | Opt-in private trackpad monitoring, device lifecycle, save dispatch |
 | `Sources/Voca/ThreeFingerSwipeRecognizer.swift` | Pure three-finger downward gesture state machine |
 | `Sources/Voca/Store.swift` | GRDB schema, migrations, writes, queries, export |
-| `Sources/Voca/Toast.swift` | Non-activating toast panel |
+| `Sources/Voca/Toast.swift` | Non-activating toast panel and save feedback animation |
 | `Sources/Voca/GalaxyView.swift` | Galaxy model, window, rendering, interaction |
 | `build.sh` | Release bundle assembly, resources, signing, verification |
 
