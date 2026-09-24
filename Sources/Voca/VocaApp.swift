@@ -98,18 +98,14 @@ final class AppModel: ObservableObject {
     }
 }
 
-extension Notification.Name {
-    /// 点击 Dock 图标且无可见窗口时,请求打开记录窗口
-    static let openRecordsWindow = Notification.Name("VocaOpenRecordsWindow")
-}
-
 final class AppDelegate: NSObject, NSApplicationDelegate {
     func applicationDidFinishLaunching(_ notification: Notification) {
+        _ = WorkspaceNavigation.shared
         KeyboardShortcuts.onKeyUp(for: .saveSelection) {
             AppModel.shared.handleHotkey()
         }
         KeyboardShortcuts.onKeyUp(for: .openGalaxy) {
-            GalaxyWindowController.shared.toggle()
+            WorkspaceNavigation.shared.toggleGalaxy()
         }
         // 调试/自动化入口：`open Voca.app --args --galaxy` 启动即打开星图
         if CommandLine.arguments.contains("--galaxy") {
@@ -123,8 +119,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         hasVisibleWindows flag: Bool
     ) -> Bool {
         if !flag {
-            NSApp.activate(ignoringOtherApps: true)
-            NotificationCenter.default.post(name: .openRecordsWindow, object: nil)
+            WorkspaceNavigation.shared.openPanel(.library)
         }
         return true
     }
@@ -166,19 +161,6 @@ struct VocaApp: App {
         }
         .menuBarExtraStyle(.window)
 
-        Window("Voca 记录", id: "records") {
-            RecordsView()
-                .environmentObject(model.store)
-                .environmentObject(model.clipboardWatcher)
-        }
-        .defaultSize(width: 560, height: 480)
-
-        Window("剪贴板历史", id: "clipboard") {
-            ClipboardHistoryView()
-                .environmentObject(model.clipboardWatcher)
-                .environmentObject(model.store)
-        }
-        .defaultSize(width: 520, height: 460)
     }
 }
 
@@ -212,7 +194,6 @@ struct MenuBarView: View {
     @EnvironmentObject private var store: ClipStore
     @EnvironmentObject private var watcher: ClipboardWatcher
     @ObservedObject private var model = AppModel.shared
-    @Environment(\.openWindow) private var openWindow
 
     var body: some View {
         VStack(alignment: .leading, spacing: 10) {
@@ -242,23 +223,21 @@ struct MenuBarView: View {
             Divider()
 
             Button {
-                GalaxyWindowController.shared.toggle()
+                WorkspaceNavigation.shared.toggleGalaxy()
             } label: {
                 Label("星图模式", systemImage: "sparkles")
                     .frame(maxWidth: .infinity, alignment: .leading)
             }
 
             Button {
-                openWindow(id: "records")
-                NSApp.activate(ignoringOtherApps: true)
+                WorkspaceNavigation.shared.openPanel(.library)
             } label: {
                 Label("查看全部记录", systemImage: "list.bullet.rectangle")
                     .frame(maxWidth: .infinity, alignment: .leading)
             }
 
             Button {
-                openWindow(id: "clipboard")
-                NSApp.activate(ignoringOtherApps: true)
+                WorkspaceNavigation.shared.openPanel(.clipboard)
             } label: {
                 Label("剪贴板历史", systemImage: "clipboard")
                     .frame(maxWidth: .infinity, alignment: .leading)
@@ -273,9 +252,6 @@ struct MenuBarView: View {
         }
         .padding(12)
         .frame(width: 260)
-        .onReceive(NotificationCenter.default.publisher(for: .openRecordsWindow)) { _ in
-            openWindow(id: "records")
-        }
     }
 }
 

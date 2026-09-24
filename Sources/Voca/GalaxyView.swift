@@ -17,7 +17,6 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
 
 import AppKit
-import Carbon.HIToolbox
 import SwiftUI
 import simd
 
@@ -170,7 +169,12 @@ final class GalaxyModel: ObservableObject {
     @Published var selectedItem: GalaxyItem?
     /// 双击词条发出的编辑请求(GalaxyView 监听后弹出编辑面板;剪贴板条目无编辑界面,忽略)
     @Published var pendingEdit: GalaxyItem?
-    @Published var source: GalaxySource = .library
+    @Published var refractionQuery = ""
+    @Published var source: GalaxySource = GalaxySource(
+        rawValue: UserDefaults.standard.string(forKey: "galaxyLastSource") ?? ""
+    ) ?? .library {
+        didSet { UserDefaults.standard.set(source.rawValue, forKey: "galaxyLastSource") }
+    }
     /// 源切换动效方向(true=向前/右滑语义);由快捷键或顶栏切换设置,渲染层消费后置 nil
     @Published var pendingSourceSwitch: Bool?
     @Published var isTimelineVisible = false
@@ -373,14 +377,24 @@ final class GalaxyWindowController {
     private var model = GalaxyModel()
 
     var isOpen: Bool { window?.isVisible == true }
+    var isActive: Bool { NSApp.isActive && window?.isKeyWindow == true }
+    var hostedWindow: NSWindow? { window }
+    var source: GalaxySource { model.source }
 
-    func toggle() {
-        isOpen ? close() : open()
-    }
-
-    func open() {
-        model.source = .library
-        model.rebuild(from: AppModel.shared.store.clips)
+    func open(source: GalaxySource? = nil, initiallyTransparent: Bool = false) {
+        if let source { model.source = source }
+        switch model.source {
+        case .library:
+            model.rebuild(from: AppModel.shared.store.clips)
+        case .clipboard:
+            model.rebuild(fromClipboard: AppModel.shared.clipboardWatcher.entries)
+        case .refraction:
+            let term = model.refractionQuery.trimmingCharacters(in: .whitespacesAndNewlines)
+            let clips = term.isEmpty ? [] : AppModel.shared.store.clips.filter {
+                $0.text.localizedCaseInsensitiveContains(term)
+            }
+            model.rebuild(from: clips, announceSampling: false)
+        }
         let screenFrame = NSScreen.main?.visibleFrame
             ?? NSRect(x: 0, y: 0, width: 1200, height: 800)
 
@@ -408,6 +422,7 @@ final class GalaxyWindowController {
         }
 
         installEventMonitor()
+        window.alphaValue = initiallyTransparent ? 0 : 1
         window.makeKeyAndOrderFront(nil)
         NSApp.activate(ignoringOtherApps: true)
         setGalaxyRendering(paused: false, in: window.contentView)
@@ -419,6 +434,16 @@ final class GalaxyWindowController {
         setGalaxyRendering(paused: true, in: window.contentView)
         model.selectedItem = nil
         window.orderOut(nil)
+        window.alphaValue = 1
+    }
+
+    func switchSource(forward: Bool) {
+        let order = GalaxySource.allCases
+        guard let index = order.firstIndex(of: model.source) else { return }
+        let next = index + (forward ? 1 : -1)
+        guard order.indices.contains(next) else { return }
+        model.pendingSourceSwitch = forward
+        model.source = order[next]
     }
 
     private func installEventMonitor() {
@@ -431,7 +456,8 @@ final class GalaxyWindowController {
                 self.model.turnTimelinePage(with: event)
                 return nil
             }
-            guard event.type == .keyDown, event.keyCode == 53 else { return event }
+            guard event.type == .keyDown, event.window === self.window,
+                  event.keyCode == 53 else { return event }
             if self.model.selectedItem != nil {
                 self.model.selectedItem = nil
             } else {
@@ -482,10 +508,6 @@ private struct GalaxyView: View {
     @State private var timelineEvents: [ClipEvent] = []
     @State private var selectedTimelineIndex = 0
     @State private var showTuning = false
-    /// 折射模式的词库检索词
-    @State private var refractionQuery = ""
-    /// ⇧⌥/⇧⌘+方向键切换的本地事件监听句柄
-    @State private var arrowSwitchMonitor: Any?
 
     var body: some View {
         GeometryReader { geometry in
@@ -528,7 +550,7 @@ private struct GalaxyView: View {
                 if model.source == .refraction {
                     refractionSearchBar
                         .padding(.bottom, 10)
-                        .onChange(of: refractionQuery) { _, query in
+                        .onChange(of: model.refractionQuery) { _, query in
                             applyRefractionQuery(query)
                         }
                 }
@@ -559,12 +581,6 @@ private struct GalaxyView: View {
         .animation(selectionAnimation, value: model.selectedItem?.clipId)
         .animation(selectionAnimation, value: model.isTimelineVisible)
         .animation(selectionAnimation, value: model.timelinePage)
-        .onAppear {
-            installArrowSwitchMonitor()
-        }
-        .onDisappear {
-            removeArrowSwitchMonitor()
-        }
     }
 
     private var deletingClipboard: Bool {
@@ -743,14 +759,14 @@ private struct GalaxyView: View {
                             ? "星图还是空的"
                             : model.source == .clipboard
                                 ? "暂无剪贴板文字"
-                                : refractionQuery.isEmpty ? "输入关键词检索" : "没有匹配的词条",
+                                : model.refractionQuery.isEmpty ? "输入关键词检索" : "没有匹配的词条",
                         systemImage: "sparkles",
                         description: Text(
                             model.source == .library
                                 ? "保存一些文字后，它们会出现在这里。"
                                 : model.source == .clipboard
                                     ? "复制文字后，它会出现在这里；图片和文件仍可在剪贴板历史中查看。"
-                                    : refractionQuery.isEmpty
+                                    : model.refractionQuery.isEmpty
                                         ? "在下方输入关键词，球面会显示词库中匹配的词条。"
                                         : "换个关键词试试。"
                         )
@@ -846,15 +862,15 @@ private struct GalaxyView: View {
         }
     }
 
-    /// 折射模式:球下方的词库检索框;聚焦时方向键组合仍可切换源
+    /// 折射模式:球下方的词库检索框;聚焦时方向键保留原生文本编辑行为
     private var refractionSearchBar: some View {
         HStack(spacing: 8) {
             Image(systemName: "magnifyingglass")
-            TextField("输入关键词，检索词库（回车开始）", text: $refractionQuery)
+            TextField("输入关键词，检索词库（回车开始）", text: $model.refractionQuery)
                 .textFieldStyle(.plain)
-            if !refractionQuery.isEmpty {
+            if !model.refractionQuery.isEmpty {
                 Button {
-                    refractionQuery = ""
+                    model.refractionQuery = ""
                 } label: {
                     Image(systemName: "xmark.circle.fill")
                         .foregroundStyle(.secondary)
@@ -870,45 +886,8 @@ private struct GalaxyView: View {
         .frame(maxWidth: 340)
     }
 
-    /// 源切换统一入口(三档固定顺序:折射→词库→剪贴板;边缘忽略),带旋转动效。
-    /// 由本地按键监听调用,覆盖球面/检索框(含输入法激活)等任意焦点状态
-    private func switchSource(forward: Bool) {
-        let order = GalaxySource.allCases
-        guard let index = order.firstIndex(of: model.source) else { return }
-        let next = index + (forward ? 1 : -1)
-        guard order.indices.contains(next) else { return }
-        model.pendingSourceSwitch = forward
-        model.source = order[next]
-    }
-
-    /// ⇧⌥/⇧⌘+方向键的本地事件监听:在按键派发到控件(含输入法)之前拦截,
-    /// 保证检索框聚焦时切换依然生效;星图关闭时移除(移除动作不在回调内执行)
-    private func installArrowSwitchMonitor() {
-        guard arrowSwitchMonitor == nil else { return }
-        arrowSwitchMonitor = NSEvent.addLocalMonitorForEvents(matching: .keyDown) { event in
-            let modifiers = event.modifierFlags
-            guard modifiers.contains(.shift),
-                  modifiers.contains(.option) || modifiers.contains(.command)
-            else { return event }
-            if event.keyCode == kVK_RightArrow || event.keyCode == kVK_LeftArrow {
-                MainActor.assumeIsolated {
-                    switchSource(forward: event.keyCode == kVK_RightArrow)
-                }
-                return nil // 已处理,不再派发给焦点控件
-            }
-            return event
-        }
-    }
-
-    private func removeArrowSwitchMonitor() {
-        if let monitor = arrowSwitchMonitor {
-            NSEvent.removeMonitor(monitor)
-        }
-        arrowSwitchMonitor = nil
-    }
-
     private func refractionFilteredClips() -> [Clip] {
-        let term = refractionQuery.trimmingCharacters(in: .whitespacesAndNewlines)
+        let term = model.refractionQuery.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !term.isEmpty else { return [] }
         return store.clips.filter { $0.text.localizedCaseInsensitiveContains(term) }
     }

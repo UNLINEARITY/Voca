@@ -28,7 +28,8 @@ A completed build must contain zero errors and zero warnings.
 
 | File | Primary responsibility |
 |---|---|
-| `Sources/Voca/VocaApp.swift` | App entry, menu bar panel, records window, sheets, hotkeys |
+| `Sources/Voca/VocaApp.swift` | App entry, menu bar panel, library list, sheets, hotkeys |
+| `Sources/Voca/WorkspaceNavigation.swift` | Unified library/clipboard window, keyboard routes, layer transitions |
 | `Sources/Voca/CaptureEngine.swift` | Accessibility capture, copy fallback, browser context |
 | `Sources/Voca/ClipboardWatcher.swift` | Pasteboard monitoring, history persistence, copy-back |
 | `Sources/Voca/Store.swift` | GRDB schema, migrations, writes, queries, export |
