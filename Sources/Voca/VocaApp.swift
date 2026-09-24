@@ -34,6 +34,16 @@ final class AppModel: ObservableObject {
 
     /// Dock 图标偏好存储键
     static let showsDockIconKey = "showsDockIcon"
+    static let threeFingerSaveKey = "threeFingerSaveEnabled"
+
+    @Published private(set) var threeFingerSaveStatus: TrackpadGestureMonitor.Status = .off
+    @Published var threeFingerSaveEnabled: Bool {
+        didSet {
+            guard oldValue != threeFingerSaveEnabled else { return }
+            UserDefaults.standard.set(threeFingerSaveEnabled, forKey: Self.threeFingerSaveKey)
+            TrackpadGestureMonitor.shared.setEnabled(threeFingerSaveEnabled)
+        }
+    }
 
     /// 在 Dock 显示应用图标;关闭只隐藏 Dock 图标,菜单栏与后台运行不受影响,不会退出
     @Published var showsDockIcon: Bool {
@@ -55,7 +65,25 @@ final class AppModel: ObservableObject {
                 ? false
                 : UserDefaults.standard.bool(forKey: Self.showsDockIconKey)
         )
+        _threeFingerSaveEnabled = Published(
+            initialValue: UserDefaults.standard.bool(forKey: Self.threeFingerSaveKey)
+        )
         clipboardWatcher = ClipboardWatcher(store: store)
+    }
+
+    func startGestureMonitorIfNeeded() {
+        TrackpadGestureMonitor.shared.onStatus = { [weak self] status in
+            MainActor.assumeIsolated { self?.threeFingerSaveStatus = status }
+        }
+        TrackpadGestureMonitor.shared.onSave = { [weak self] in
+            MainActor.assumeIsolated {
+                guard self?.threeFingerSaveEnabled == true else { return }
+                self?.handleHotkey()
+            }
+        }
+        if threeFingerSaveEnabled {
+            TrackpadGestureMonitor.shared.setEnabled(true)
+        }
     }
 
     func handleHotkey() {
@@ -101,6 +129,7 @@ final class AppModel: ObservableObject {
 final class AppDelegate: NSObject, NSApplicationDelegate {
     func applicationDidFinishLaunching(_ notification: Notification) {
         _ = WorkspaceNavigation.shared
+        AppModel.shared.startGestureMonitorIfNeeded()
         KeyboardShortcuts.onKeyUp(for: .saveSelection) {
             AppModel.shared.handleHotkey()
         }
@@ -212,6 +241,16 @@ struct MenuBarView: View {
             KeyboardShortcuts.Recorder("保存快捷键：", name: .saveSelection)
             KeyboardShortcuts.Recorder("星图快捷键：", name: .openGalaxy)
 
+            Toggle(isOn: $model.threeFingerSaveEnabled) {
+                Label("三指下滑保存（实验性）", systemImage: "hand.draw")
+            }
+            if model.threeFingerSaveEnabled {
+                Text(gestureStatusText)
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+                    .fixedSize(horizontal: false, vertical: true)
+            }
+
             Toggle(isOn: $watcher.isEnabled) {
                 Label("记录剪贴板历史", systemImage: "doc.on.clipboard")
             }
@@ -252,6 +291,15 @@ struct MenuBarView: View {
         }
         .padding(12)
         .frame(width: 260)
+    }
+
+    private var gestureStatusText: String {
+        switch model.threeFingerSaveStatus {
+        case .off: return ""
+        case .unavailable: return "当前系统不支持触控板监听；保存快捷键仍可使用。"
+        case .waiting: return "等待内建或外接触控板；保存快捷键仍可使用。"
+        case .ready: return "若与 App Exposé 冲突，请在系统设置中手动改为四指下滑或关闭该手势。"
+        }
     }
 }
 

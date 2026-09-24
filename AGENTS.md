@@ -32,6 +32,8 @@ A completed build must contain zero errors and zero warnings.
 | `Sources/Voca/WorkspaceNavigation.swift` | Unified library/clipboard window, keyboard routes, layer transitions |
 | `Sources/Voca/CaptureEngine.swift` | Accessibility capture, copy fallback, browser context |
 | `Sources/Voca/ClipboardWatcher.swift` | Pasteboard monitoring, history persistence, copy-back |
+| `Sources/Voca/TrackpadGestureMonitor.swift` | Opt-in private trackpad monitoring, device lifecycle, save dispatch |
+| `Sources/Voca/ThreeFingerSwipeRecognizer.swift` | Pure three-finger downward gesture state machine |
 | `Sources/Voca/Store.swift` | GRDB schema, migrations, writes, queries, export |
 | `Sources/Voca/Toast.swift` | Non-activating toast panel |
 | `Sources/Voca/GalaxyView.swift` | Galaxy model, window, rendering, interaction |

@@ -18,6 +18,11 @@ let package = Package(
                 .product(name: "KeyboardShortcuts", package: "KeyboardShortcuts"),
             ],
             path: "Sources/Voca"
+        ),
+        .testTarget(
+            name: "VocaTests",
+            dependencies: ["Voca"],
+            path: "Tests/VocaTests"
         )
     ]
 )
