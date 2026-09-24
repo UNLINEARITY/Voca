@@ -272,7 +272,7 @@ struct ClipboardHistoryView: View {
                     Text(
                         watcher.isEnabled
                             ? "暂无剪贴板记录\n复制的内容会出现在这里；点 ➕ 将文本收入词库"
-                            : "剪贴板记录已关闭\n可在菜单栏 ❝ 图标中开启"
+                            : "剪贴板记录已关闭\n可在菜单栏 Voca 图标中开启"
                     )
                     .multilineTextAlignment(.center)
                     .foregroundStyle(.secondary)

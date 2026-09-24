@@ -161,7 +161,8 @@ struct VocaApp: App {
                 .environmentObject(model.store)
                 .environmentObject(model.clipboardWatcher)
         } label: {
-            Image(systemName: "text.quote")
+            Image(nsImage: VocaMenuBarArtwork.image)
+                .accessibilityLabel("Voca")
         }
         .menuBarExtraStyle(.window)
 
@@ -183,6 +184,30 @@ struct VocaApp: App {
 
 // MARK: - 菜单栏面板
 
+private enum VocaMenuBarArtwork {
+    static let image: NSImage = {
+        let image = NSImage(size: NSSize(width: 18, height: 18), flipped: false) { rect in
+            NSColor.black.setStroke()
+
+            let rim = NSBezierPath(ovalIn: rect.insetBy(dx: 1, dy: 1))
+            rim.lineWidth = 1.4
+            rim.stroke()
+
+            let letter = NSBezierPath()
+            letter.move(to: NSPoint(x: 5.1, y: 11.5))
+            letter.line(to: NSPoint(x: 9, y: 5.2))
+            letter.line(to: NSPoint(x: 12.9, y: 11.5))
+            letter.lineWidth = 1.7
+            letter.lineCapStyle = .round
+            letter.lineJoinStyle = .round
+            letter.stroke()
+            return true
+        }
+        image.isTemplate = true
+        return image
+    }()
+}
+
 struct MenuBarView: View {
     @EnvironmentObject private var store: ClipStore
     @EnvironmentObject private var watcher: ClipboardWatcher
@@ -192,7 +217,7 @@ struct MenuBarView: View {
     var body: some View {
         VStack(alignment: .leading, spacing: 10) {
             HStack(spacing: 6) {
-                Image(systemName: "text.quote")
+                Image(nsImage: VocaMenuBarArtwork.image)
                     .foregroundStyle(.secondary)
                 Text("Voca").font(.headline)
                 Spacer()
