@@ -17,13 +17,14 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
 
 import AppKit
+import ImageIO
 import SwiftUI
 
-/// 一条剪贴板历史：文本可入库并持久化；图片/文件仅会话内展示
+/// 一条剪贴板历史：文本可入库；文本与图片持久化，文件仅会话内展示
 struct ClipboardEntry: Identifiable, Equatable {
     let id: UUID
     let text: String?
-    let image: NSImage?
+    let isImage: Bool
     let fileNames: [String]?
     let appName: String?
     let appBundleID: String?
@@ -37,7 +38,7 @@ struct ClipboardEntry: Identifiable, Equatable {
     }
 }
 
-/// 剪贴板监听：文本条目持久化（不去重，无上限保留；启动载入最近 2000 条）；图片/文件仅会话内展示
+/// 剪贴板监听：文本与图片持久化（启动载入最近 2000 条）；文件仅会话内展示
 @MainActor
 final class ClipboardWatcher: ObservableObject {
     private static let defaultsKey = "clipboardWatcherEnabled"
@@ -52,6 +53,8 @@ final class ClipboardWatcher: ObservableObject {
 
     private let store: ClipStore
     private var timer: Timer?
+    private let imageQueue = DispatchQueue(label: "local.voca.Voca.clipboard-images", qos: .utility)
+    private var pendingImages: [UUID: (type: NSPasteboard.PasteboardType, data: Data)] = [:]
     private var lastChangeCount: Int
     /// 最近一条文本记录的时间(同文本短窗防抖用)
     private var lastTextEntryAt: Date?
@@ -122,6 +125,31 @@ final class ClipboardWatcher: ObservableObject {
 
         let app = NSWorkspace.shared.frontmostApplication
 
+        // 图片优先于附带文字，但文件 URL 不作为图片保存。
+        let fileURLs = pasteboard.readObjects(
+            forClasses: [NSURL.self], options: [.urlReadingFileURLsOnly: true]
+        ) as? [URL] ?? []
+        if fileURLs.isEmpty,
+           let representation = Self.imageRepresentation(on: pasteboard),
+           NSImage(data: representation.data) != nil
+        {
+            let entry = ClipboardEntry(
+                id: UUID(), text: nil, isImage: true, fileNames: nil,
+                appName: app?.localizedName, appBundleID: app?.bundleIdentifier,
+                url: nil, date: Date()
+            )
+            entries.insert(entry, at: 0)
+            pendingImages[entry.id] = representation
+            imageQueue.async { [storage = store.imageStorage, weak self] in
+                let saved = storage.saveClipboardImage(entry, type: representation.type.rawValue, data: representation.data)
+                Task { @MainActor [weak self] in
+                    self?.pendingImages.removeValue(forKey: entry.id)
+                    if !saved { self?.entries.removeAll { $0.id == entry.id } }
+                }
+            }
+            return
+        }
+
         // 1) 文本：直接记录 + 持久化；来自浏览器时后台补填当前标签页 URL。
         //    同一文本 2 秒内的重复写入(应用多阶段写剪贴板/连按 ⌘C)只记一次
         if let text = pasteboard.string(forType: .string)?
@@ -138,7 +166,7 @@ final class ClipboardWatcher: ObservableObject {
             let entry = ClipboardEntry(
                 id: UUID(),
                 text: trimmed,
-                image: nil,
+                isImage: false,
                 fileNames: nil,
                 appName: app?.localizedName,
                 appBundleID: app?.bundleIdentifier,
@@ -152,16 +180,13 @@ final class ClipboardWatcher: ObservableObject {
         }
 
         // 2) 文件（仅会话内展示）
-        if let urls = pasteboard.readObjects(
-            forClasses: [NSURL.self],
-            options: [.urlReadingFileURLsOnly: true]
-        ) as? [URL], !urls.isEmpty {
+        if !fileURLs.isEmpty {
             appendEphemeral(
                 ClipboardEntry(
                     id: UUID(),
                     text: nil,
-                    image: nil,
-                    fileNames: urls.map(\.lastPathComponent),
+                    isImage: false,
+                    fileNames: fileURLs.map(\.lastPathComponent),
                     appName: app?.localizedName,
                     appBundleID: app?.bundleIdentifier,
                     url: nil,
@@ -170,21 +195,40 @@ final class ClipboardWatcher: ObservableObject {
             )
             return
         }
+    }
 
-        // 3) 图片（仅会话内展示）
-        if let image = NSImage(pasteboard: pasteboard) {
-            appendEphemeral(
-                ClipboardEntry(
-                    id: UUID(),
-                    text: nil,
-                    image: image,
-                    fileNames: nil,
-                    appName: app?.localizedName,
-                    appBundleID: app?.bundleIdentifier,
-                    url: nil,
-                    date: Date()
-                )
-            )
+    static func imageRepresentation(on pasteboard: NSPasteboard) -> (type: NSPasteboard.PasteboardType, data: Data)? {
+        // 保留实际写入的编码，而不是通过 NSImage 重新编码。
+        let supported: Set<NSPasteboard.PasteboardType> = [
+            .png, .tiff, .init("public.jpeg"), .init("public.heic"), .init("public.gif")
+        ]
+        for item in pasteboard.pasteboardItems ?? [] {
+            for type in item.types where supported.contains(type) {
+                if let data = item.data(forType: type), !data.isEmpty { return (type, data) }
+            }
+        }
+        return nil
+    }
+
+    func imagePreview(for id: UUID) async -> NSImage? {
+        let pending = pendingImages[id]?.data
+        return await withCheckedContinuation { continuation in
+            imageQueue.async { [storage = store.imageStorage] in
+                let data = pending ?? storage.loadClipboardImage(id: id)?.data
+                let image: NSImage?
+                if let data,
+                   let source = CGImageSourceCreateWithData(data as CFData, nil),
+                   let thumbnail = CGImageSourceCreateThumbnailAtIndex(source, 0, [
+                       kCGImageSourceCreateThumbnailFromImageAlways: true,
+                       kCGImageSourceThumbnailMaxPixelSize: 160,
+                       kCGImageSourceCreateThumbnailWithTransform: true
+                   ] as CFDictionary) {
+                    image = NSImage(cgImage: thumbnail, size: .zero)
+                } else {
+                    image = nil
+                }
+                continuation.resume(returning: image)
+            }
         }
     }
 
@@ -227,12 +271,19 @@ final class ClipboardWatcher: ObservableObject {
 
     func remove(_ entry: ClipboardEntry) {
         entries.removeAll { $0.id == entry.id }
-        store.deleteClipboardEntry(id: entry.id)
+        pendingImages.removeValue(forKey: entry.id)
+        if entry.isImage {
+            imageQueue.async { [storage = store.imageStorage] in storage.deleteClipboardImage(id: entry.id) }
+        } else {
+            store.deleteClipboardEntry(id: entry.id)
+        }
     }
 
     func clear() {
         entries.removeAll()
+        pendingImages.removeAll()
         store.clearClipboardEntries()
+        imageQueue.async { [storage = store.imageStorage] in storage.clearClipboardImages() }
     }
 
     /// 把文本写回剪贴板（Voca 自己发起的写入不计入历史）
@@ -251,11 +302,40 @@ final class ClipboardWatcher: ObservableObject {
             copyText(text)
             return
         }
-        guard let image = entry.image else { return }
+        guard entry.isImage else { return }
+        if let pending = pendingImages[entry.id] {
+            writeImageToPasteboard(type: pending.type, data: pending.data)
+            return
+        }
+        let changeCountAtClick = NSPasteboard.general.changeCount
+        imageQueue.async { [storage = store.imageStorage, weak self] in
+            let image = storage.loadClipboardImage(id: entry.id)
+            Task { @MainActor [weak self] in
+                guard let self, self.entries.contains(where: { $0.id == entry.id }),
+                      NSPasteboard.general.changeCount == changeCountAtClick else { return }
+                guard let image else {
+                    ToastController.shared.show("图片读取失败")
+                    return
+                }
+                self.writeImageToPasteboard(type: .init(image.type), data: image.data)
+            }
+        }
+    }
+
+    private func writeImageToPasteboard(type: NSPasteboard.PasteboardType, data: Data) {
         let pasteboard = NSPasteboard.general
-        guard pasteboard.writeObjects([image]) else { return }
+        guard Self.writeImage(type: type, data: data, on: pasteboard) else {
+            ToastController.shared.show("图片复制失败")
+            return
+        }
         lastChangeCount = pasteboard.changeCount
         ToastController.shared.show("已复制")
+    }
+
+    @discardableResult
+    static func writeImage(type: NSPasteboard.PasteboardType, data: Data, on pasteboard: NSPasteboard) -> Bool {
+        pasteboard.clearContents()
+        return pasteboard.setData(data, forType: type)
     }
 }
 
@@ -327,7 +407,7 @@ struct ClipboardHistoryView: View {
                 }
                 Button("取消", role: .cancel) {}
             } message: {
-                Text("将移除全部 \(watcher.entries.count) 条历史（不影响词库）")
+                Text("将移除全部剪贴板历史，包括未载入的记录和图片；不影响词库")
             }
         }
     }
@@ -354,7 +434,7 @@ struct ClipboardHistoryView: View {
                     .buttonStyle(.borderless)
                     .help(expanded ? "收起" : "展开全文")
                 }
-                if entry.isText || entry.image != nil {
+                if entry.isText || entry.isImage {
                     Button {
                         watcher.copyToPasteboard(entry)
                     } label: {
@@ -417,12 +497,30 @@ struct ClipboardHistoryView: View {
             .font(.system(size: listFontSize))
             .lineLimit(1)
             .foregroundStyle(.secondary)
-        } else if let image = entry.image {
-            Image(nsImage: image)
-                .resizable()
-                .aspectRatio(contentMode: .fit)
-                .frame(maxHeight: 64)
-                .cornerRadius(4)
+        } else if entry.isImage {
+            ClipboardImagePreview(id: entry.id)
+        }
+    }
+
+    private struct ClipboardImagePreview: View {
+        @EnvironmentObject private var watcher: ClipboardWatcher
+        let id: UUID
+        @State private var image: NSImage?
+
+        var body: some View {
+            Group {
+                if let image {
+                    Image(nsImage: image)
+                        .resizable()
+                        .aspectRatio(contentMode: .fit)
+                } else {
+                    Image(systemName: "photo")
+                        .foregroundStyle(.secondary)
+                }
+            }
+            .frame(maxHeight: 64)
+            .cornerRadius(4)
+            .task(id: id) { image = await watcher.imagePreview(for: id) }
         }
     }
 

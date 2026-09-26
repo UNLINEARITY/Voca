@@ -68,6 +68,7 @@ struct ClipEvent: Codable, Identifiable, Equatable, FetchableRecord, Persistable
 
 final class ClipStore: ObservableObject {
     private let dbQueue: DatabaseQueue
+    let imageStorage: ClipboardImageStorage
     @Published private(set) var clips: [Clip] = []
 
     private static let logger = Logger(subsystem: "local.voca.Voca", category: "store")
@@ -92,6 +93,7 @@ final class ClipStore: ObservableObject {
         config.journalMode = .wal
         config.busyMode = .timeout(5)
         dbQueue = try DatabaseQueue(path: dbURL.path, configuration: config)
+        imageStorage = ClipboardImageStorage(dbQueue: dbQueue)
 
         var migrator = DatabaseMigrator()
         migrator.registerMigration("v1") { db in
@@ -172,6 +174,17 @@ final class ClipStore: ObservableObject {
                 columns: ["lastSeenAt"]
             )
             try db.drop(index: "idx_clips_createdAt")
+        }
+        migrator.registerMigration("v6") { db in
+            try db.create(table: "clipboard_images") { t in
+                t.column("id", .text).primaryKey()
+                t.column("type", .text).notNull()
+                t.column("data", .blob).notNull()
+                t.column("appName", .text)
+                t.column("appBundleID", .text)
+                t.column("date", .datetime).notNull()
+            }
+            try db.create(index: "idx_clipboard_images_date", on: "clipboard_images", columns: ["date"])
         }
         try migrator.migrate(dbQueue)
         clips = (try? loadClips(search: "")) ?? []
@@ -422,7 +435,7 @@ final class ClipStore: ObservableObject {
         reload(search: currentSearch)
     }
 
-    // MARK: - 剪贴板历史持久化（仅文本条目）
+    // MARK: - 剪贴板历史持久化
 
     /// 启动载入最近的历史（新复制内容即时追加，不经过此方法）
     /// limit：载入条数，默认为下方常量
@@ -432,16 +445,22 @@ final class ClipStore: ObservableObject {
         let rows = (try? dbQueue.read { db in
             try Row.fetchAll(
                 db,
-                sql: "SELECT id, text, appName, appBundleID, url, date FROM clipboard_entries ORDER BY date DESC LIMIT ?",
+                sql: """
+                    SELECT id, text, appName, appBundleID, url, date, 0 AS isImage
+                    FROM clipboard_entries
+                    UNION ALL
+                    SELECT id, NULL AS text, appName, appBundleID, NULL AS url, date, 1 AS isImage
+                    FROM clipboard_images
+                    ORDER BY date DESC LIMIT ?
+                    """,
                 arguments: [limit]
             )
         }) ?? []
         return rows.compactMap { row in
             let idString: String? = row["id"]
             let text: String? = row["text"]
-            guard let id = idString.flatMap(UUID.init(uuidString:)), let text else {
-                return nil
-            }
+            guard let id = idString.flatMap(UUID.init(uuidString:)) else { return nil }
+            let isImage: Bool = row["isImage"]
             let appName: String? = row["appName"]
             let appBundleID: String? = row["appBundleID"]
             let url: String? = row["url"]
@@ -449,7 +468,7 @@ final class ClipStore: ObservableObject {
             return ClipboardEntry(
                 id: id,
                 text: text,
-                image: nil,
+                isImage: isImage,
                 fileNames: nil,
                 appName: appName,
                 appBundleID: appBundleID,
@@ -519,5 +538,61 @@ final class ClipStore: ObservableObject {
             .replacingOccurrences(of: "%", with: "\\%")
             .replacingOccurrences(of: "_", with: "\\_")
         return "%\(escaped)%"
+    }
+}
+
+/// Only GRDB's serialized DatabaseQueue is shared across threads here; no UI state is exposed.
+final class ClipboardImageStorage: @unchecked Sendable {
+    private let dbQueue: DatabaseQueue
+    private static let logger = Logger(subsystem: "local.voca.Voca", category: "clipboard-images")
+
+    init(dbQueue: DatabaseQueue) { self.dbQueue = dbQueue }
+
+    @discardableResult
+    func saveClipboardImage(_ entry: ClipboardEntry, type: String, data: Data) -> Bool {
+        do {
+            try dbQueue.write { db in
+                try db.execute(
+                    sql: "INSERT INTO clipboard_images (id, type, data, appName, appBundleID, date) VALUES (?, ?, ?, ?, ?, ?)",
+                    arguments: [entry.id.uuidString, type, data, entry.appName, entry.appBundleID, entry.date]
+                )
+            }
+            return true
+        } catch {
+            Self.logger.error("图片历史写入失败: \(error, privacy: .public)")
+            return false
+        }
+    }
+
+    func loadClipboardImage(id: UUID) -> (type: String, data: Data)? {
+        do {
+            return try dbQueue.read { db in
+                guard let row = try Row.fetchOne(
+                    db, sql: "SELECT type, data FROM clipboard_images WHERE id = ?", arguments: [id.uuidString]
+                ) else { return nil }
+                return (row["type"], row["data"])
+            }
+        } catch {
+            Self.logger.error("图片历史读取失败: \(error, privacy: .public)")
+            return nil
+        }
+    }
+
+    func deleteClipboardImage(id: UUID) {
+        do {
+            try dbQueue.write { db in
+                try db.execute(sql: "DELETE FROM clipboard_images WHERE id = ?", arguments: [id.uuidString])
+            }
+        } catch {
+            Self.logger.error("移除图片记录失败: \(error, privacy: .public)")
+        }
+    }
+
+    func clearClipboardImages() {
+        do {
+            try dbQueue.write { db in try db.execute(sql: "DELETE FROM clipboard_images") }
+        } catch {
+            Self.logger.error("清空图片历史失败: \(error, privacy: .public)")
+        }
     }
 }
