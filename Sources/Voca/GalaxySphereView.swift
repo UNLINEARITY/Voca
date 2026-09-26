@@ -90,7 +90,11 @@ final class GalaxySceneView: SCNView {
         let point = convert(event.locationInWindow, from: nil)
         interactionCoordinator?.endDrag()
         if !didDrag {
-            interactionCoordinator?.select(at: point, in: self)
+            if event.clickCount >= 2 {
+                interactionCoordinator?.lookup(at: point, in: self)
+            } else {
+                interactionCoordinator?.select(at: point, in: self)
+            }
         }
         mouseDownPoint = nil
         didDrag = false
@@ -339,6 +343,21 @@ final class GalaxySceneCoordinator: NSObject {
         model?.selectedItem = clipID.flatMap { id in
             latestItems.first { $0.clipId == id }
         }
+    }
+
+    /// 双击词条 → 快速查词浮窗（词典卡/翻译，与词库列表双击同款纯查看）
+    func lookup(at point: CGPoint, in view: SCNView) {
+        let options: [SCNHitTestOption: Any] = [
+            .searchMode: SCNHitTestSearchMode.all.rawValue,
+            .backFaceCulling: true,
+        ]
+        let clipID = view.hitTest(point, options: options).lazy.compactMap { result in
+            self.clipID(from: result.node)
+        }.first
+        guard let item = clipID.flatMap({ id in latestItems.first { $0.clipId == id } }),
+            !item.text.isEmpty
+        else { return }
+        LookupPopupController.shared.handleViewOnly(item.text)
     }
 
     /// 选中词条后按回车 → 发出编辑请求(GalaxyView 弹编辑面板;剪贴板条目无编辑界面,忽略)

@@ -372,7 +372,8 @@ struct RecordsView: View {
                         )
                         .contentShape(Rectangle())
                         .onTapGesture(count: 2) {
-                            editingClip = clip
+                            // 双击 = 查词/翻译浮窗；编辑走行内 ✏️ 按钮
+                            LookupPopupController.shared.handleViewOnly(clip.text)
                         }
                     }
                     .listStyle(.inset)
@@ -586,17 +587,12 @@ struct EditClipSheet: View {
     @Environment(\.dismiss) private var dismiss
     @State private var text: String
     @State private var note: String
-    /// 保存时是单个英文单词时携带词典结果（只读单行主键查询，init 内同步取）
-    @State private var lookupResult: DictionaryLookupResult?
 
     init(clip: Clip, onSave: @escaping (String, String?) -> Void) {
         self.clip = clip
         self.onSave = onSave
         _text = State(initialValue: clip.text)
         _note = State(initialValue: clip.note ?? "")
-        _lookupResult = State(
-            initialValue: DictionaryService.shared.lookup(clip.text)
-        )
     }
 
     private var trimmedText: String {
@@ -606,10 +602,6 @@ struct EditClipSheet: View {
     var body: some View {
         VStack(alignment: .leading, spacing: 10) {
             Text("编辑记录").font(.headline)
-
-            if let lookupResult {
-                DictionaryCardView(result: lookupResult)
-            }
 
             VStack(alignment: .leading, spacing: 4) {
                 Text("内容").font(.caption).foregroundStyle(.secondary)
@@ -636,10 +628,7 @@ struct EditClipSheet: View {
             }
         }
         .padding(16)
-        .frame(width: 460, height: lookupResult == nil ? 440 : 620)
-        .onDisappear {
-            SpeechService.shared.stop()
-        }
+        .frame(width: 460, height: 440)
     }
 
     /// 多行编辑框：与其他编辑区均分空间，内容过多时内部滚动

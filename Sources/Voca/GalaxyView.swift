@@ -899,7 +899,7 @@ private struct GalaxyView: View {
     }
 
     private var hintBar: some View {
-        Text("拖拽或双指滑动旋转 · 滚轮/捏合/调参调整字号 · 点击词条展开轨道 · ESC 退出")
+        Text("拖拽或双指滑动旋转 · 滚轮/捏合/调参调整字号 · 单击词条展开轨道 · 双击查词 · ESC 退出")
             .font(.caption)
             .foregroundStyle(.secondary)
             .padding(.horizontal, 16)

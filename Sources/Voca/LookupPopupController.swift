@@ -84,7 +84,22 @@ final class LookupPopupController: NSObject {
             return
         }
         saveContext = (appName, bundleID, url)
-        show(content: item)
+        show(content: item, allowSave: true)
+    }
+
+    /// 词库列表双击查看：纯查词/翻译浮窗，无「收入词库」按钮
+    /// （词条已在库中，避免译文覆盖用户手写备注）
+    func handleViewOnly(_ raw: String) {
+        let item: LookupContent
+        switch Self.outcome(for: raw) {
+        case .card(let result):
+            item = .card(result)
+        case .translate(let text, let direction):
+            item = .translation(original: text, direction: direction)
+        case .ignored:
+            return
+        }
+        show(content: item, allowSave: false)
     }
 
     /// 系统服务入口：Info.plist NSServices → NSMessage "lookupWordService"。
@@ -112,11 +127,12 @@ final class LookupPopupController: NSObject {
 
     // MARK: - 面板
 
-    private func show(content: LookupContent) {
+    private func show(content: LookupContent, allowSave: Bool) {
         self.content = content
         let hostView = NSHostingView(
             rootView: LookupPopupView(
                 content: content,
+                allowSave: allowSave,
                 onSave: { [weak self] note in self?.saveToLibrary(note: note) }
             )
         )
@@ -250,6 +266,7 @@ final class LookupPopupController: NSObject {
 /// 浮窗内容：词条卡或翻译视图 + 底部「收入词库」按钮
 private struct LookupPopupView: View {
     let content: LookupContent
+    var allowSave = true
     let onSave: (String?) -> Void
     @State private var saved = false
     @State private var translationResult: String?
@@ -280,22 +297,24 @@ private struct LookupPopupView: View {
                         ? original : (translationResult ?? "")
                 )
             }
-            Divider()
-            HStack {
-                Button {
-                    guard !saved else { return }
-                    saved = true
-                    onSave(translationResult)
-                } label: {
-                    Label(
-                        saved ? "已入库" : "收入词库",
-                        systemImage: saved ? "checkmark.circle.fill" : "plus.circle"
-                    )
-                    .font(.callout)
+            if allowSave {
+                Divider()
+                HStack {
+                    Button {
+                        guard !saved else { return }
+                        saved = true
+                        onSave(translationResult)
+                    } label: {
+                        Label(
+                            saved ? "已入库" : "收入词库",
+                            systemImage: saved ? "checkmark.circle.fill" : "plus.circle"
+                        )
+                        .font(.callout)
+                    }
+                    .buttonStyle(.borderless)
+                    .disabled(saved)
+                    Spacer()
                 }
-                .buttonStyle(.borderless)
-                .disabled(saved)
-                Spacer()
             }
         }
         .padding(12)
