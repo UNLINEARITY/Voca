@@ -292,7 +292,8 @@ final class WorkspaceNavigation: ObservableObject {
         )
         shell.isOpaque = false
         shell.backgroundColor = .clear
-        shell.hasShadow = true
+        // 形变拖影不投影：巨大阴影随形状跳动会加重闪烁感，只保留两端真实窗口的阴影
+        shell.hasShadow = false
         shell.ignoresMouseEvents = true
         shell.level = .floating
         let glass = NSVisualEffectView(frame: NSRect(origin: .zero, size: frame.size))
@@ -306,7 +307,16 @@ final class WorkspaceNavigation: ObservableObject {
         glass.layer?.borderColor = NSColor.white.withAlphaComponent(0.45).cgColor
         glass.layer?.borderWidth = 1
         shell.contentView = glass
+        // 浅色外观下 hudWindow 材质接近亮白，全尺寸满透明度瞬间出现会读作白闪：
+        // 按外观降低峰值透明度并快速淡入，让壳只作为形状过渡的痕迹
+        let isDark = shell.effectiveAppearance.bestMatch(from: [.aqua, .darkAqua]) == .darkAqua
+        shell.alphaValue = 0
         shell.orderFrontRegardless()
+        NSAnimationContext.runAnimationGroup { context in
+            context.duration = 0.10
+            context.timingFunction = CAMediaTimingFunction(name: .easeOut)
+            shell.animator().alphaValue = isDark ? 0.95 : 0.6
+        }
         return shell
     }
 
