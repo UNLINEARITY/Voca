@@ -165,7 +165,10 @@ final class GalaxySceneView: SCNView {
 @MainActor
 final class GalaxySceneCoordinator: NSObject {
     private static let sphereRadius: CGFloat = 1.48
-    private static let baseAutoRotate: Float = 0.06
+    /// 自转基准速度（rad/s）：调参面板「自转速度」驱动，0 = 静止
+    private var baseAutoRotate: Float {
+        Float(GalaxyTuning.shared.rotationSpeed)
+    }
     private static let selectedLift: Float = 0.09
 
     private struct RenderedLabel {
@@ -189,7 +192,7 @@ final class GalaxySceneCoordinator: NSObject {
 
     private var yaw: Float = 0.18
     private var pitch: Float = -0.08
-    private var yawVelocity = GalaxySceneCoordinator.baseAutoRotate
+    private var yawVelocity: Float
     private var pitchVelocity: Float = 0
     private var lastFrameTime: TimeInterval?
     private var lastDrag: (point: CGPoint, time: TimeInterval)?
@@ -198,6 +201,7 @@ final class GalaxySceneCoordinator: NSObject {
 
     init(model: GalaxyModel) {
         self.model = model
+        yawVelocity = Float(GalaxyTuning.shared.rotationSpeed)
         super.init()
         configureScene()
     }
@@ -246,7 +250,7 @@ final class GalaxySceneCoordinator: NSObject {
         latestItems = items
         if self.reverseRotation != reverseRotation {
             self.reverseRotation = reverseRotation
-            yawVelocity = selectedID == nil ? Self.baseAutoRotate : 0
+            yawVelocity = selectedID == nil ? baseAutoRotate : 0
             pitchVelocity = 0
         }
         let signature = itemSignature(items)
@@ -818,8 +822,8 @@ final class GalaxySceneCoordinator: NSObject {
             yawVelocity *= pow(0.0001, delta)
             pitchVelocity *= pow(0.0001, delta)
         } else {
-            yawVelocity = Self.baseAutoRotate
-                + (yawVelocity - Self.baseAutoRotate) * pow(0.05, delta)
+            yawVelocity = baseAutoRotate
+                + (yawVelocity - baseAutoRotate) * pow(0.05, delta)
             pitchVelocity *= pow(0.02, delta)
         }
         applyRotation()

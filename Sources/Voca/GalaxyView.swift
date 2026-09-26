@@ -35,6 +35,10 @@ final class GalaxyTuning: ObservableObject {
     @Published var warpFalloff: Double { didSet { save("warpFalloff", warpFalloff) } }
     @Published var rimStrength: Double { didSet { save("rimStrength", rimStrength) } }
     @Published var fresnelTint: Double { didSet { save("fresnelTint", fresnelTint) } }
+    @Published var highlightIntensity: Double { didSet { save("highlightIntensity", highlightIntensity) } }
+    @Published var causticIntensity: Double { didSet { save("causticIntensity", causticIntensity) } }
+    @Published var innerRimStart: Double { didSet { save("innerRimStart", innerRimStart) } }
+    @Published var rotationSpeed: Double { didSet { save("rotationSpeed", rotationSpeed) } }
     @Published var sphereScale: Double { didSet { save("sphereScale", sphereScale) } }
     @Published var ringScale: Double { didSet { save("ringScale", ringScale) } }
     @Published var coreDarkCenter: Double { didSet { save("coreDarkCenter", coreDarkCenter) } }
@@ -54,6 +58,10 @@ final class GalaxyTuning: ObservableObject {
         warpFalloff = defaults.object(forKey: "gt.warpFalloff") as? Double ?? 1.0
         rimStrength = defaults.object(forKey: "gt.rimStrength") as? Double ?? 0.30
         fresnelTint = defaults.object(forKey: "gt.fresnelTint") as? Double ?? 0.16
+        highlightIntensity = defaults.object(forKey: "gt.highlightIntensity") as? Double ?? 1.0
+        causticIntensity = defaults.object(forKey: "gt.causticIntensity") as? Double ?? 1.0
+        innerRimStart = defaults.object(forKey: "gt.innerRimStart") as? Double ?? 0.90
+        rotationSpeed = defaults.object(forKey: "gt.rotationSpeed") as? Double ?? 0.06
         sphereScale = defaults.object(forKey: "gt.sphereScale") as? Double ?? 0.40
         ringScale = defaults.object(forKey: "gt.ringScale") as? Double ?? 1.25
         coreDarkCenter = defaults.object(forKey: "gt.coreDarkCenter") as? Double ?? 0.10
@@ -69,7 +77,10 @@ final class GalaxyTuning: ObservableObject {
 
     func reset() {
         dispersion = 20; chromaExponent = 2.0; refraction = 0.85; warpFalloff = 1.0
-        rimStrength = 0.30; fresnelTint = 0.16; sphereScale = 0.40; ringScale = 1.25
+        rimStrength = 0.30; fresnelTint = 0.16
+        highlightIntensity = 1.0; causticIntensity = 1.0; innerRimStart = 0.90
+        rotationSpeed = 0.06
+        sphereScale = 0.40; ringScale = 1.25
         coreDarkCenter = 0.10; coreDarkEdge = 0.28
         reverseRotation = false
         distribution = .fibonacci
@@ -510,6 +521,7 @@ private struct GalaxyView: View {
     @EnvironmentObject private var store: ClipStore
     @EnvironmentObject private var watcher: ClipboardWatcher
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
+    @AppStorage("galaxyChromeFontSize") private var galaxyChromeFontSize = 13.0
     @State private var editingClip: Clip?
     @State private var deletingEntry: GalaxyEntry?
     @State private var promotedIDs: Set<UUID> = []
@@ -792,13 +804,19 @@ private struct GalaxyView: View {
 
     // MARK: 顶部与提示
 
+    /// 星图界面文字：设置页「星图界面字号」驱动，各元素按相对偏移派生
+    /// （顶栏/检索框/轨道卡值 +0，轨道卡标题 +2，注释卡 +1，提示条/页码 -1）
+    private func chromeSize(_ offset: Double = 0) -> CGFloat {
+        Typography.derived(galaxyChromeFontSize, offset: offset)
+    }
+
     private var topBar: some View {
         GlassEffectContainer(spacing: 12) {
             HStack(spacing: 12) {
                 HStack(spacing: 9) {
                     Image(systemName: "sparkles")
                     Text("Voca 星图")
-                        .font(.system(size: 13, weight: .semibold))
+                        .font(.system(size: chromeSize(), weight: .semibold))
                     Text("\(model.items.count) 条")
                         .font(.caption)
                         .foregroundStyle(.secondary)
@@ -898,7 +916,7 @@ private struct GalaxyView: View {
                 .help("清空")
             }
         }
-        .font(.system(size: 13))
+        .font(.system(size: chromeSize()))
         .padding(.horizontal, 14)
         .padding(.vertical, 9)
         .glassEffect(.regular, in: Capsule())
@@ -918,7 +936,7 @@ private struct GalaxyView: View {
 
     private var hintBar: some View {
         Text("拖拽或双指滑动旋转 · ESC 退出")
-            .font(.system(size: 12))
+            .font(.system(size: chromeSize(-1)))
             .foregroundStyle(.secondary)
             .padding(.horizontal, 16)
             .padding(.vertical, 9)
@@ -931,7 +949,7 @@ private struct GalaxyView: View {
         label: String = "注释"
     ) -> some View {
         let width = min(560, max(220, availableWidth - 48))
-        let fontSize: CGFloat = 14
+        let fontSize = chromeSize(1)
         let textHeight = (note as NSString).boundingRect(
             with: CGSize(width: width - 36, height: .greatestFiniteMagnitude),
             options: [.usesLineFragmentOrigin, .usesFontLeading],
@@ -997,6 +1015,10 @@ private struct GalaxyView: View {
                 Text("正向：文字跟随指针或手指移动")
                     .font(.caption2)
                     .foregroundStyle(.secondary)
+                tuningSlider("自转速度", value: $tuning.rotationSpeed, range: 0...0.15, format: "%.3f")
+                Text("0 表示静止不动")
+                    .font(.caption2)
+                    .foregroundStyle(.secondary)
 
                 Divider()
 
@@ -1005,12 +1027,15 @@ private struct GalaxyView: View {
                 tuningSlider("折射扭曲", value: $tuning.refraction, range: 0...1, format: "%.2f")
                 tuningSlider("扭曲衰减", value: $tuning.warpFalloff, range: 0.4...2, format: "%.2f")
                 tuningSlider("边缘厚度", value: $tuning.rimStrength, range: 0...0.6, format: "%.2f")
+                tuningSlider("内圈起始", value: $tuning.innerRimStart, range: 0.8...0.95, format: "%.2f")
                 tuningSlider("菲涅尔蓝", value: $tuning.fresnelTint, range: 0...0.4, format: "%.2f")
+                tuningSlider("高光强度", value: $tuning.highlightIntensity, range: 0...2, format: "%.2f")
+                tuningSlider("光斑强度", value: $tuning.causticIntensity, range: 0...3, format: "%.2f")
 
                 Divider()
 
                 tuningSlider("文字大小", value: $model.fontScale, range: 0.5...2.5, format: "%.2f×")
-                Text("作用于球面文字；星图界面文字为固定字号，列表与浮窗字号在设置页调整")
+                Text("作用于球面文字；星图界面文字在设置页「星图界面字号」调整")
                     .font(.caption2)
                     .foregroundStyle(.secondary)
                 tuningSlider("球体大小", value: $tuning.sphereScale, range: 0.25...0.48, format: "%.2f")
@@ -1401,10 +1426,10 @@ private struct GalaxyView: View {
 
             VStack(alignment: side == .left ? .trailing : .leading, spacing: 3) {
                 Text(title)
-                    .font(.system(size: 15, weight: .semibold))
+                    .font(.system(size: chromeSize(2), weight: .semibold))
                     .foregroundStyle(.primary)
                 Text(value)
-                    .font(.system(size: 13, weight: .semibold))
+                    .font(.system(size: chromeSize(), weight: .semibold))
                     .foregroundStyle(.primary)
                     .lineLimit(lineLimit)
                     .truncationMode(.tail)
@@ -1479,7 +1504,7 @@ private struct GalaxyView: View {
                     .help("查看较新的记录")
 
                     Text("\(model.timelinePage + 1) / \(model.timelinePageCount)")
-                        .font(.system(size: 12).monospacedDigit())
+                        .font(.system(size: chromeSize(-1)).monospacedDigit())
                         .foregroundStyle(.secondary)
 
                     Button {

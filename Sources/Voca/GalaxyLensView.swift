@@ -103,6 +103,8 @@ private struct GalaxyLensUniforms {
     var padding: Float = 0
     /// x=色散分布指数 y=扭曲衰减 z=边缘厚度 w=菲涅尔蓝调
     var tuning = SIMD4<Float>(2.0, 1.0, 0.30, 0.16)
+    /// x=高光强度 y=光斑强度 z=内圈起始半径 w=保留
+    var look = SIMD4<Float>(1.0, 1.0, 0.90, 0)
 }
 
 private final class GalaxyLensOutput: NSObject, SCStreamOutput {
@@ -455,6 +457,12 @@ private final class GalaxyLensRenderer: NSObject, MTKViewDelegate, SCStreamDeleg
                 Float(tuning.warpFalloff),
                 Float(tuning.rimStrength),
                 Float(tuning.fresnelTint)
+            ),
+            look: SIMD4(
+                Float(tuning.highlightIntensity),
+                Float(tuning.causticIntensity),
+                Float(tuning.innerRimStart),
+                0
             )
         )
     }
@@ -482,6 +490,7 @@ private final class GalaxyLensRenderer: NSObject, MTKViewDelegate, SCStreamDeleg
         float dispersion;
         float padding;
         float4 tuning; // x=chromaExponent y=warpFalloff z=rimStrength w=fresnelTint
+        float4 look;   // x=highlight y=caustic z=innerRimStart w=reserved
     };
 
     vertex LensVertexOut galaxyLensVertex(uint vertexID [[vertex_id]]) {
@@ -560,13 +569,13 @@ private final class GalaxyLensRenderer: NSObject, MTKViewDelegate, SCStreamDeleg
 
         color *= half(1.0 - fresnel * 0.075);
         color += half3(0.23, 0.30, 0.38) * half(fresnel * uniforms.tuning.w);
-        color += half3(1.0, 0.97, 0.90) * half(sharpHighlight * 0.48);
-        color += half3(0.30, 0.38, 0.48) * half(softHighlight * 0.055);
-        color += half3(0.48, 0.67, 0.82) * half(caustic * 0.075);
+        color += half3(1.0, 0.97, 0.90) * half(sharpHighlight * 0.48 * uniforms.look.x);
+        color += half3(0.30, 0.38, 0.48) * half(softHighlight * 0.055 * uniforms.look.x);
+        color += half3(0.48, 0.67, 0.82) * half(caustic * 0.075 * uniforms.look.y);
 
         // Darken only the final inner millimetres to make the glass thickness
         // legible while keeping the sphere itself optically transparent.
-        float innerRim = smoothstep(0.90, 0.998, radius);
+        float innerRim = smoothstep(uniforms.look.z, 0.998, radius);
         color *= half(1.0 - innerRim * uniforms.tuning.z);
         return half4(color, 1.0);
     }
