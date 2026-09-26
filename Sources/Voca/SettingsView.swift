@@ -249,6 +249,7 @@ struct SettingsView: View {
 struct SharedToggleRows: View {
     @ObservedObject private var model = AppModel.shared
     @EnvironmentObject private var watcher: ClipboardWatcher
+    @AppStorage("rootDecompositionEnabled") private var rootDecompositionEnabled = true
 
     var body: some View {
         Toggle(isOn: $model.showsDockIcon) {
@@ -259,6 +260,9 @@ struct SharedToggleRows: View {
         }
         Toggle(isOn: $model.threeFingerSaveEnabled) {
             Label("三指下滑保存（实验性）", systemImage: "hand.draw")
+        }
+        Toggle(isOn: $rootDecompositionEnabled) {
+            Label("词根智能拆解", systemImage: "text.badget.star")
         }
         if model.threeFingerSaveEnabled {
             Text(model.gestureStatusText)

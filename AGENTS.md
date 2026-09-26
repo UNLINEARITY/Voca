@@ -45,7 +45,7 @@ A completed build must contain zero errors and zero warnings.
 | `Sources/Voca/SettingsView.swift` | Settings tab in the workspace panel: toggles, shortcuts, library management, database, about |
 | `Sources/Voca/LibraryInfo.swift` | Library stats, database size, safe VACUUM INTO snapshot backup |
 | `Sources/Voca/LookupPopupController.swift` | Cursor-side lookup/translation popup, service receiver, placement |
-| `scripts/make_dictionary.py` | Generates the embedded dictionary.sqlite from the ECDICT CSV |
+| `scripts/make_dictionary.py` | Generates the embedded dictionary.sqlite from the ECDICT CSV, wordroot.txt, and Moby Thesaurus |
 | `build.sh` | Release bundle assembly, resources, signing, verification |
 
 Treat this map as navigation, not as an architectural boundary. Update it when responsibilities move.

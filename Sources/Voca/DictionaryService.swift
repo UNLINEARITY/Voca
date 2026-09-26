@@ -58,10 +58,48 @@ struct DictionaryEntry: Equatable, Codable, FetchableRecord {
     }
 }
 
-/// 查询结果：命中的词条 +（若是词形变体时）其原形词条
+/// 查询结果：命中的词条 +（若是词形变体时）其原形词条 + 学习增强内容
 struct DictionaryLookupResult: Equatable {
     let entry: DictionaryEntry
     let lemma: DictionaryEntry?
+    var enrichment: DictionaryEnrichment?
+}
+
+/// 词典卡的学习增强内容（词根/词形家族/相关短语/同义词）
+struct DictionaryEnrichment: Equatable {
+    struct RootPart: Equatable {
+        let key: String
+        let meaning: String
+        let origin: String
+        let examples: [String]
+        /// true = 直接标注（wordroot 例词反查），false = 边界智能拆解
+        let direct: Bool
+
+        /// 展示名：多别名 key 取首个（"spect, spec"→spect），去尾部编号（"in-1"→in-）
+        var displayName: String {
+            var name = key.split(separator: ",").first.map {
+                String($0).trimmingCharacters(in: .whitespaces)
+            } ?? key
+            while let last = name.last, last.isNumber {
+                name.removeLast()
+            }
+            return name
+        }
+    }
+
+    /// 词根/词缀拆解（按词内位置排序）
+    var roots: [RootPart] = []
+    /// 词形家族（原形的全部变化形式）
+    var family: [(label: String, form: String)] = []
+    /// 包含该词的常用短语
+    var phrases: [String] = []
+    /// 英英同义词（Moby Thesaurus，公有领域）
+    var synonyms: [String] = []
+
+    static func == (lhs: DictionaryEnrichment, rhs: DictionaryEnrichment) -> Bool {
+        lhs.roots == rhs.roots && lhs.family.map(\.form) == rhs.family.map(\.form)
+            && lhs.phrases == rhs.phrases && lhs.synonyms == rhs.synonyms
+    }
 }
 
 /// 内嵌词典查询：bundle 内 dictionary.sqlite 只读访问。
@@ -111,8 +149,234 @@ final class DictionaryService: @unchecked Sendable {
             lemmaWord.caseInsensitiveCompare(entry.word) != .orderedSame {
             lemma = fetch(lemmaWord, in: dbQueue)
         }
-        return DictionaryLookupResult(entry: entry, lemma: lemma)
+        return DictionaryLookupResult(
+            entry: entry,
+            lemma: lemma,
+            enrichment: enrich(entry: entry, lemma: lemma, in: dbQueue)
+        )
     }
+
+    // MARK: - 学习增强内容
+
+    /// 词根库内存缓存（611 条，首次使用时加载）
+    /// key 可含多别名（"spect, spec"），前缀/后缀条目去掉尾部编号（"in-1"→"in"）
+    struct RootAlias: Equatable {
+        enum Kind { case prefix, root, suffix }
+        let key: String
+        let meaning: String
+        let origin: String
+        let examples: [String]
+        let kind: Kind
+        let alias: String
+    }
+
+    private var rootCache: [RootAlias]?
+
+    private func enrich(
+        entry: DictionaryEntry, lemma: DictionaryEntry?, in dbQueue: DatabaseQueue
+    ) -> DictionaryEnrichment? {
+        var result = DictionaryEnrichment()
+        // 主展示词：变体取原形，否则词条本身
+        let head = lemma ?? entry
+        let headWord = head.word.lowercased()
+
+        result.roots = roots(for: headWord, in: dbQueue)
+        result.family = Self.familyForms(of: head)
+        // 短语/同义词只对单词查（短语查短语无意义且慢）
+        if !headWord.contains(" ") {
+            result.phrases = phrases(containing: headWord, in: dbQueue)
+            result.synonyms = synonyms(for: headWord, in: dbQueue) ?? []
+        }
+        if result.roots.isEmpty && result.family.isEmpty
+            && result.phrases.isEmpty && result.synonyms.isEmpty {
+            return nil
+        }
+        return result
+    }
+
+    /// 词根：直接标注优先，无标注且开关开启时智能拆解
+    func roots(for word: String, in dbQueue: DatabaseQueue) -> [DictionaryEnrichment.RootPart] {
+        if let direct = directRoots(for: word, in: dbQueue), !direct.isEmpty {
+            return direct
+        }
+        guard Self.rootDecompositionEnabled else { return [] }
+        return Self.decompose(word: word, aliases: rootTable(in: dbQueue))
+    }
+
+    static var rootDecompositionEnabled: Bool {
+        UserDefaults.standard.object(forKey: "rootDecompositionEnabled") == nil
+            ? true : UserDefaults.standard.bool(forKey: "rootDecompositionEnabled")
+    }
+
+    private func directRoots(
+        for word: String, in dbQueue: DatabaseQueue
+    ) -> [DictionaryEnrichment.RootPart]? {
+        var keys: String?
+        _ = try? dbQueue.read { db in
+            keys = try String.fetchOne(
+                db, sql: "SELECT root_keys FROM word_roots WHERE word = ? COLLATE NOCASE",
+                arguments: [word]
+            )
+        }
+        guard let keys, !keys.isEmpty else { return nil }
+        let table = rootTable(in: dbQueue)
+        return keys.split(separator: ",")
+            .map { String($0).trimmingCharacters(in: .whitespaces) }
+            .compactMap { key in table.first { $0.key == key } }
+            .map { DictionaryEnrichment.RootPart(
+                key: $0.key, meaning: $0.meaning, origin: $0.origin,
+                examples: $0.examples, direct: true
+            ) }
+    }
+
+    private func rootTable(in dbQueue: DatabaseQueue) -> [RootAlias] {
+        if let rootCache { return rootCache }
+        var all: [RootAlias] = []
+        _ = try? dbQueue.read { db in
+            let rows = try Row.fetchAll(
+                db, sql: "SELECT key, meaning, class, origin, examples FROM roots"
+            )
+            for row in rows {
+                let key: String = row["key"]
+                let wordClass: String = row["class"]
+                let examplesRaw: String = row["examples"]
+                let kind: RootAlias.Kind
+                if wordClass.contains("prefix") {
+                    kind = .prefix
+                } else if wordClass.contains("suffix") {
+                    kind = .suffix
+                } else {
+                    kind = .root
+                }
+                for alias in key.split(separator: ",") {
+                    let trimmed = alias.trimmingCharacters(
+                        in: CharacterSet(charactersIn: " 0123456789-"))
+                    guard trimmed.count >= 2 else { continue }
+                    all.append(RootAlias(
+                        key: key, meaning: row["meaning"], origin: row["origin"],
+                        examples: examplesRaw.isEmpty
+                            ? [] : examplesRaw.components(separatedBy: ", "),
+                        kind: kind, alias: trimmed
+                    ))
+                }
+            }
+        }
+        rootCache = all
+        return all
+    }
+
+    /// 边界智能拆解：前缀（词首最长匹配）+ 词根（贪心最长匹配，≥3 字母）+ 后缀（词尾最长匹配）；
+    /// 找不到词根则不展示（避免子串噪声）
+    static func decompose(
+        word: String, aliases: [RootAlias]
+    ) -> [DictionaryEnrichment.RootPart] {
+        let lower = word.lowercased()
+        guard lower.allSatisfy({ $0.isLetter }), lower.count >= 4 else { return [] }
+
+        func longestMatch(_ s: String, kind: RootAlias.Kind, atStart: Bool) -> RootAlias? {
+            aliases
+                .filter { $0.kind == kind && $0.alias.count >= 2 }
+                .filter { atStart ? s.hasPrefix($0.alias) : s.hasSuffix($0.alias) }
+               .max { $0.alias.count < $1.alias.count }
+        }
+
+        var middle = lower
+        var parts: [RootAlias] = []
+        if let prefix = longestMatch(middle, kind: .prefix, atStart: true),
+            middle.count - prefix.alias.count >= 3 {
+            parts.append(prefix)
+            middle.removeFirst(prefix.alias.count)
+        }
+        if let suffix = longestMatch(middle, kind: .suffix, atStart: false),
+            middle.count - suffix.alias.count >= 3 {
+            parts.append(suffix)
+            middle.removeLast(suffix.alias.count)
+        }
+
+        // 中段贪心扫词根：每个位置取最长匹配，找不到前进一位
+        var found: [RootAlias] = []
+        var index = middle.startIndex
+        while index < middle.endIndex {
+            let rest = String(middle[index...])
+            if let root = aliases
+                .filter({ $0.kind == .root && $0.alias.count >= 3 && rest.hasPrefix($0.alias) })
+                .max(by: { $0.alias.count < $1.alias.count }) {
+                found.append(root)
+                index = middle.index(index, offsetBy: root.alias.count, limitedBy: middle.endIndex) ?? middle.endIndex
+            } else if let next = middle.index(index, offsetBy: 1, limitedBy: middle.endIndex), next < middle.endIndex {
+                index = next
+            } else {
+                break
+            }
+        }
+        guard !found.isEmpty else { return [] }
+        parts.append(contentsOf: found)
+
+        // 按词内顺序输出（前缀 → 词根 → 后缀）
+        let ordered = parts.sorted { a, b in
+            let ia = lower.range(of: a.alias)?.lowerBound ?? lower.startIndex
+            let ib = lower.range(of: b.alias)?.lowerBound ?? lower.startIndex
+            return ia < ib
+        }
+        return ordered.map { DictionaryEnrichment.RootPart(
+            key: $0.key, meaning: $0.meaning, origin: $0.origin,
+            examples: $0.examples, direct: false
+        ) }
+    }
+
+    /// exchange → 词形家族（d过去式 p过去分词 i现在分词 3第三人称 s复数 r比较级 t最高级）
+    static func familyForms(of entry: DictionaryEntry) -> [(label: String, form: String)] {
+        let labels = ["d": "过去式", "p": "过去分词", "i": "现在分词",
+                      "3": "第三人称", "s": "复数", "r": "比较级", "t": "最高级"]
+        var seen = Set<String>()
+        var result: [(String, String)] = []
+        for part in entry.exchange.split(separator: "/") {
+            let pieces = part.split(separator: ":", maxSplits: 1)
+            guard pieces.count == 2,
+                  let label = labels[String(pieces[0])] else { continue }
+            let form = String(pieces[1])
+            guard !form.isEmpty,
+                  form.caseInsensitiveCompare(entry.word) != .orderedSame,
+                  seen.insert(form.lowercased()).inserted else { continue }
+            result.append((label, form))
+        }
+        return result
+    }
+
+    /// 包含该词的常用短语（短语短者优先，排除词条本身）
+    private func phrases(
+        containing word: String, in dbQueue: DatabaseQueue
+    ) -> [String] {
+        var rows: [String] = []
+        _ = try? dbQueue.read { db in
+            rows = try String.fetchAll(
+                db,
+                sql: """
+                    SELECT word FROM dictionary
+                    WHERE (word LIKE ? OR word LIKE ? OR word LIKE ?)
+                      AND word <> ? COLLATE NOCASE
+                    ORDER BY LENGTH(word) LIMIT 5
+                    """,
+                arguments: ["\(word) %", "% \(word)", "% \(word) %", word]
+            )
+        }
+        return rows
+    }
+
+    /// 英英同义词（词条无则试原形）
+    private func synonyms(
+        for word: String, in dbQueue: DatabaseQueue
+    ) -> [String]? {
+        var value: String?
+        _ = try? dbQueue.read { db in
+            value = try String.fetchOne(
+                db, sql: "SELECT synonyms FROM thesaurus WHERE word = ? COLLATE NOCASE",
+                arguments: [word]
+            )
+        }
+        return value.map { $0.components(separatedBy: ",") }
+    }
+
 
     private func fetch(_ word: String, in dbQueue: DatabaseQueue) -> DictionaryEntry? {
         var result: DictionaryEntry?

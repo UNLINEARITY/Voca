@@ -18,8 +18,15 @@
 # SPDX-License-Identifier: AGPL-3.0-or-later
 """从 ECDICT 原始 CSV 生成 Voca 内嵌只读词典 dictionary.sqlite。
 
-数据源：https://github.com/skywind3000/ECDICT （MIT License）
-用法：python3 scripts/make_dictionary.py <ecdict.csv> [-o 输出路径]
+数据源：
+  - https://github.com/skywind3000/ECDICT （MIT License）
+  - 词根词缀：ECDICT 仓库 wordroot.txt（MIT）
+  - 英英同义词：Moby Thesaurus II（Grady Ward，公有领域）
+用法：
+  全量生成：python3 scripts/make_dictionary.py <ecdict.csv> \
+              [--wordroot wordroot.txt] [--thesaurus mthesaur.txt]
+  仅增强：  python3 scripts/make_dictionary.py --enrich <dictionary.sqlite> \
+              --wordroot wordroot.txt --thesaurus mthesaur.txt
 
 收录规则（目标：单词 + 短语 + 专业术语的离线词典）：
   1. 核心：当代语料库词频 frq 或 BNC 词频 bnc 排名前 15 万；
@@ -31,15 +38,23 @@
   4. 短语与专业术语：2 到 5 个单词、带中文释义的多词词条
      （含 [计]/[医]/[化]/[经] 等领域术语，全量收录）
 
+增强表（--wordroot / --thesaurus 可选输入）：
+  roots(word_roots) —— 词根词缀库与词条直接反查索引
+  thesaurus —— 英英同义词（每词截取前 12 条）
+
 生成表结构：
   dictionary(word 主键 COLLATE NOCASE, phonetic, translation, definition,
              exchange, tag, collins, oxford, bnc, frq)
+  roots(key 主键, meaning, class, origin, examples)
+  word_roots(word 主键 COLLATE NOCASE, root_keys)
+  thesaurus(word 主键 COLLATE NOCASE, synonyms)
   meta(key, value) — 数据来源、条目数、生成参数等元信息
 """
 
 import argparse
 import csv
 import datetime
+import json
 import os
 import re
 import sqlite3
@@ -55,6 +70,71 @@ PHRASE_MAX_WORDS = 5
 
 COLUMNS = ["word", "phonetic", "translation", "definition",
            "exchange", "tag", "collins", "oxford", "bnc", "frq"]
+
+MAX_SYNONYMS = 12
+MAX_ROOT_EXAMPLES = 8
+
+
+def enrich(db, wordroot_path, thesaurus_path):
+    """写入词根词缀库与英英同义词表（幂等：先 DROP 再建）。"""
+    db.execute("DROP TABLE IF EXISTS roots")
+    db.execute("DROP TABLE IF EXISTS word_roots")
+    db.execute("DROP TABLE IF EXISTS thesaurus")
+
+    if wordroot_path:
+        roots = json.load(open(wordroot_path, encoding="utf-8"))
+        db.execute(
+            "CREATE TABLE roots ("
+            "key TEXT PRIMARY KEY, "
+            "meaning TEXT NOT NULL DEFAULT '', "
+            "class TEXT NOT NULL DEFAULT '', "
+            "origin TEXT NOT NULL DEFAULT '', "
+            "examples TEXT NOT NULL DEFAULT '')")
+        db.execute(
+            "CREATE TABLE word_roots ("
+            "word TEXT PRIMARY KEY COLLATE NOCASE, "
+            "root_keys TEXT NOT NULL)")
+        word2keys = {}
+        for key, info in roots.items():
+            examples = ", ".join((info.get("example") or [])[:MAX_ROOT_EXAMPLES])
+            db.execute(
+                "INSERT OR IGNORE INTO roots (key, meaning, class, origin, examples) "
+                "VALUES (?,?,?,?,?)",
+                (key, info.get("meaning") or "", info.get("class") or "",
+                 info.get("origin") or "", examples))
+            for word in info.get("example") or []:
+                word2keys.setdefault(word.lower(), []).append(key)
+        db.executemany(
+            "INSERT OR IGNORE INTO word_roots (word, root_keys) VALUES (?,?)",
+            [(w, ",".join(ks)) for w, ks in word2keys.items()])
+        db.execute(
+            "INSERT OR REPLACE INTO meta (key, value) VALUES ('wordroot', ?)",
+            (str(len(roots)),))
+        print(f"词根/词缀 {len(roots)} 条，直接反查词 {len(word2keys)} 个")
+
+    if thesaurus_path:
+        db.execute(
+            "CREATE TABLE thesaurus ("
+            "word TEXT PRIMARY KEY COLLATE NOCASE, "
+            "synonyms TEXT NOT NULL)")
+        count = 0
+        with open(thesaurus_path, encoding="utf-8", errors="ignore") as f:
+            for line in f:
+                parts = line.strip().split(",")
+                if len(parts) < 2:
+                    continue
+                word = parts[0].strip().lower()
+                synonyms = [p.strip() for p in parts[1:MAX_SYNONYMS + 1] if p.strip()]
+                if word and synonyms:
+                    db.execute(
+                        "INSERT OR IGNORE INTO thesaurus (word, synonyms) VALUES (?,?)",
+                        (word, ",".join(synonyms)))
+                    count += 1
+        db.execute(
+            "INSERT OR REPLACE INTO meta (key, value) VALUES ('thesaurus', ?)",
+            (str(count),))
+        print(f"同义词 {count} 条")
+    db.commit()
 
 
 def to_int(value):
@@ -166,8 +246,12 @@ def build_db(selected, out_path):
 
 
 def main():
-    parser = argparse.ArgumentParser(description="生成 Voca 内嵌词典")
-    parser.add_argument("ecdict_csv", help="ECDICT 的 ecdict.csv 路径")
+    parser = argparse.ArgumentParser(description="生成/增强 Voca 内嵌词典")
+    parser.add_argument("ecdict_csv", nargs="?", help="ECDICT 的 ecdict.csv 路径")
+    parser.add_argument("--enrich", metavar="DB",
+                        help="仅增强已有词典库（词根/同义词表），不重算词条")
+    parser.add_argument("--wordroot", help="ECDICT wordroot.txt 路径（词根词缀）")
+    parser.add_argument("--thesaurus", help="Moby Thesaurus II mthesaur.txt 路径")
     parser.add_argument("-o", "--output",
                         default=os.path.join(os.path.dirname(__file__), "..",
                                              "Sources", "Voca", "Resources",
@@ -175,11 +259,34 @@ def main():
                         help="输出路径（默认 Sources/Voca/Resources/dictionary.sqlite）")
     args = parser.parse_args()
 
+    if args.enrich:
+        if not os.path.exists(args.enrich):
+            sys.exit(f"词典库不存在：{args.enrich}")
+        db = sqlite3.connect(args.enrich)
+        try:
+            enrich(db, args.wordroot, args.thesaurus)
+            db.execute("VACUUM")
+            db.commit()
+        finally:
+            db.close()
+        size = os.path.getsize(args.enrich) / 1048576
+        print(f"增强完成 {args.enrich}（{size:.1f} MB）")
+        return
+
+    if not args.ecdict_csv:
+        sys.exit("请提供 ecdict.csv，或使用 --enrich 增强已有词典库")
+
     entries = load_entries(args.ecdict_csv)
     print(f"读取 {len(entries)} 条原始词条")
     selected = select_entries(entries)
     os.makedirs(os.path.dirname(os.path.abspath(args.output)), exist_ok=True)
     build_db(selected, args.output)
+    if args.wordroot or args.thesaurus:
+        db = sqlite3.connect(args.output)
+        try:
+            enrich(db, args.wordroot, args.thesaurus)
+        finally:
+            db.close()
 
 
 if __name__ == "__main__":

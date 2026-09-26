@@ -96,7 +96,92 @@ struct DictionaryCardView: View {
         } else {
             senseBlock(entry)
         }
+        enrichmentSections
         tagsRow
+    }
+
+    // MARK: - 学习增强区块（词根/词形家族/相关短语/同义词）
+
+    @ViewBuilder
+    private var enrichmentSections: some View {
+        if let e = result.enrichment {
+            if !e.roots.isEmpty {
+                Divider().padding(.vertical, 1)
+                rootSection(e.roots)
+            }
+            if !e.family.isEmpty {
+                Divider().padding(.vertical, 1)
+                VStack(alignment: .leading, spacing: 3) {
+                    sectionLabel("词形家族")
+                    Text(e.family.map { "\($0.label) \($0.form)" }.joined(separator: " · "))
+                        .font(.system(size: Typography.derived(popupFontSize, offset: -1)))
+                        .textSelection(.enabled)
+                }
+            }
+            if !e.phrases.isEmpty {
+                Divider().padding(.vertical, 1)
+                VStack(alignment: .leading, spacing: 3) {
+                    sectionLabel("相关短语")
+                    Text(e.phrases.joined(separator: " / "))
+                        .font(.system(size: Typography.derived(popupFontSize, offset: -1)))
+                        .foregroundStyle(.secondary)
+                        .fixedSize(horizontal: false, vertical: true)
+                        .textSelection(.enabled)
+                }
+            }
+            if !e.synonyms.isEmpty {
+                Divider().padding(.vertical, 1)
+                VStack(alignment: .leading, spacing: 3) {
+                    sectionLabel("同义词")
+                    Text(e.synonyms.prefix(8).joined(separator: ", "))
+                        .font(.system(size: Typography.derived(popupFontSize, offset: -1)))
+                        .foregroundStyle(.secondary)
+                        .fixedSize(horizontal: false, vertical: true)
+                        .textSelection(.enabled)
+                }
+            }
+        }
+    }
+
+    @ViewBuilder
+    private func rootSection(_ roots: [DictionaryEnrichment.RootPart]) -> some View {
+        VStack(alignment: .leading, spacing: 3) {
+            HStack(spacing: 6) {
+                sectionLabel("词根拆解")
+                Text(roots.allSatisfy(\.direct) ? "标注" : "拆解")
+                    .font(.caption2)
+                    .padding(.horizontal, 4)
+                    .padding(.vertical, 1)
+                    .background(Capsule().fill(.quaternary))
+                    .foregroundStyle(.secondary)
+                Spacer()
+            }
+            // in-(进入) + spect(看) + -ion(名词)
+            Text(roots.map { part in
+                "\(part.displayName)(\(part.meaning))"
+            }.joined(separator: " + "))
+                .font(.system(size: popupFontSize))
+                .textSelection(.enabled)
+            let origin = roots.map(\.origin).filter { !$0.isEmpty }.sorted().first ?? ""
+            let examples = roots.flatMap(\.examples)
+                .filter { $0.lowercased() != entry.word.lowercased() }
+            if !origin.isEmpty || !examples.isEmpty {
+                Text(([origin.isEmpty ? nil : "词源：\(origin)"]
+                    + (examples.isEmpty ? [] : ["同根：\(examples.prefix(6).joined(separator: ", "))"]))
+                    .compactMap { $0 }
+                    .joined(separator: " · "))
+                    .font(.system(size: Typography.derived(popupFontSize, offset: -2)))
+                    .foregroundStyle(.secondary)
+                    .fixedSize(horizontal: false, vertical: true)
+                    .textSelection(.enabled)
+            }
+        }
+    }
+
+    private func sectionLabel(_ title: String) -> some View {
+        Text(title)
+            .font(.caption)
+            .foregroundStyle(.secondary)
     }
 
     @ViewBuilder

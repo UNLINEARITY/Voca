@@ -276,3 +276,73 @@ final class LookupPopupLogicTests: XCTestCase {
         XCTAssertEqual(nearRight.maxX, 994, accuracy: 0.01)
     }
 }
+
+// MARK: - 词根拆解与学习增强
+
+final class RootDecomposeTests: XCTestCase {
+    private typealias Alias = DictionaryService.RootAlias
+
+    private func alias(_ key: String, kind: Alias.Kind) -> Alias {
+        Alias(key: key, meaning: "含义", origin: "", examples: [], kind: kind,
+              alias: key.split(separator: ",").first.map {
+                  String($0).trimmingCharacters(in: CharacterSet(charactersIn: " 0123456789-"))
+              } ?? key)
+    }
+
+    private var table: [Alias] {
+        [
+            alias("pre-", kind: .prefix),
+            alias("in-1", kind: .prefix),
+            alias("in-2", kind: .prefix),
+            alias("-ion", kind: .suffix),
+            alias("-less", kind: .suffix),
+            alias("spect, spec, spic", kind: .root),
+            alias("dic, dict", kind: .root),
+            alias("bio, bi", kind: .root),
+            alias("-logy, -ology", kind: .root),
+        ]
+    }
+
+    func testPrefixRootSuffix() {
+        // predict = pre- + dict
+        let parts = DictionaryService.decompose(word: "predict", aliases: table)
+        XCTAssertEqual(parts.map(\.key), ["pre-", "dic, dict"])
+        // inspection = in- + spect + -ion
+        let parts2 = DictionaryService.decompose(word: "inspection", aliases: table)
+        XCTAssertEqual(parts2.map(\.key), ["in-1", "spect, spec, spic", "-ion"])
+    }
+
+    func testCompoundRoots() {
+        // biology = bio + logy（两个词根按位置先后输出）
+        let parts = DictionaryService.decompose(word: "biology", aliases: table)
+        XCTAssertEqual(parts.map(\.key), ["bio, bi", "-logy, -ology"])
+    }
+
+    func testNoRootNoOutput() {
+        // 找不到词根（如 start）不输出，避免子串噪声
+        XCTAssertTrue(DictionaryService.decompose(word: "start", aliases: table).isEmpty)
+        XCTAssertTrue(DictionaryService.decompose(word: "go", aliases: table).isEmpty)  // 太短
+    }
+
+    func testDisplayName() {
+        XCTAssertEqual(
+            DictionaryEnrichment.RootPart(key: "in-1", meaning: "", origin: "", examples: [], direct: true).displayName,
+            "in-"
+        )
+        XCTAssertEqual(
+            DictionaryEnrichment.RootPart(key: "spect, spec", meaning: "", origin: "", examples: [], direct: true).displayName,
+            "spect"
+        )
+    }
+
+    func testFamilyForms() {
+        let go = DictionaryEntry(
+            word: "go", phonetic: "", translation: "", definition: "",
+            exchange: "d:went/p:gone/i:going/3:goes/0:go/1:p", tag: "",
+            collins: 0, oxford: 0, bnc: 0, frq: 0
+        )
+        let family = DictionaryService.familyForms(of: go)
+        XCTAssertEqual(family.map(\.form), ["went", "gone", "going", "goes"])
+        XCTAssertEqual(family.first?.label, "过去式")
+    }
+}
