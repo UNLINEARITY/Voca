@@ -467,13 +467,32 @@ final class GalaxyWindowController {
 
     private func installEventMonitor() {
         removeEventMonitor()
-        eventMonitor = NSEvent.addLocalMonitorForEvents(matching: [.keyDown, .scrollWheel]) {
+        eventMonitor = NSEvent.addLocalMonitorForEvents(
+            matching: [.keyDown, .scrollWheel, .magnify]
+        ) {
             [weak self] event in
             guard let self, self.isOpen else { return event }
             if event.type == .scrollWheel, self.model.isTimelineVisible,
                event.window === self.window {
                 self.model.turnTimelinePage(with: event)
                 return nil
+            }
+            // 检索档弹幕：滚轮与触控板滚动、捏合都缩放文字，灵敏度与球体一致
+            if event.window === self.window, self.model.source == .search {
+                switch event.type {
+                case .scrollWheel:
+                    guard event.momentumPhase == [], event.scrollingDeltaY != 0 else {
+                        return event
+                    }
+                    let sensitivity = event.hasPreciseScrollingDeltas ? 0.006 : 0.075
+                    self.model.zoom(by: exp(event.scrollingDeltaY * sensitivity))
+                    return nil
+                case .magnify:
+                    self.model.zoom(by: max(0.1, 1 + event.magnification * 1.2))
+                    return nil
+                default:
+                    break
+                }
             }
             guard event.type == .keyDown, event.window === self.window,
                   event.keyCode == 53 else { return event }
@@ -561,13 +580,27 @@ private struct GalaxyView: View {
         let radius = min(geometry.size.width, geometry.size.height) * tuning.sphereScale
 
         return ZStack {
-            sphere(diameter: radius * 2)
-                .position(x: geometry.size.width / 2, y: geometry.size.height / 2)
+            if model.source == .search {
+                searchDanmakuLayer(geometry)
+            } else {
+                sphere(diameter: radius * 2)
+                    .position(x: geometry.size.width / 2, y: geometry.size.height / 2)
+            }
 
             VStack {
                 topBar
                 Spacer()
                 if model.source == .search {
+                    if hasEmptySearchResult {
+                        Text("没有匹配的词条")
+                            .font(.system(size: chromeSize(-1)))
+                            .foregroundStyle(.secondary)
+                            .padding(.horizontal, 14)
+                            .padding(.vertical, 7)
+                            .glassEffect(.regular, in: Capsule())
+                            .padding(.bottom, 8)
+                            .transition(.opacity)
+                    }
                     searchBar
                         .padding(.bottom, 10)
                         .onChange(of: model.searchQuery) { _, query in
@@ -578,7 +611,8 @@ private struct GalaxyView: View {
             }
             .padding(20)
 
-            if let item = model.selectedItem {
+            // 检索档为弹幕形态：选中信息在底部卡片，无需轨道属性环
+            if let item = model.selectedItem, model.source != .search {
                 selectionOrbit(
                     item.entry,
                     sphereDiameter: radius * 2,
@@ -608,6 +642,43 @@ private struct GalaxyView: View {
         guard let deletingEntry else { return false }
         if case .clipboard = deletingEntry { return true }
         return false
+    }
+
+    /// 检索档弹幕层：全屏词库流；词库为空时给出引导
+    @ViewBuilder
+    private func searchDanmakuLayer(_ geometry: GeometryProxy) -> some View {
+        if store.clips.isEmpty {
+            ContentUnavailableView(
+                "词库还是空的",
+                systemImage: "list.bullet.rectangle",
+                description: Text("保存一些文字后，它们会出现在这里。")
+            )
+            .frame(maxWidth: 480)
+            .position(x: geometry.size.width / 2, y: geometry.size.height / 2)
+        } else {
+            GalaxyDanmakuView(
+                model: model,
+                clips: store.clips,
+                chromeBase: galaxyChromeFontSize,
+                reduceMotion: reduceMotion,
+                onSelect: { item in
+                    withAnimation(selectionAnimation) {
+                        model.selectedItem = item
+                    }
+                },
+                onLookup: { entry in
+                    LookupPopupController.shared.handleViewOnly(entry.text)
+                }
+            )
+            .frame(width: geometry.size.width, height: geometry.size.height)
+        }
+    }
+
+    /// 检索档：输入了关键词但词库中无命中（弹幕保留环境流，仅提示）
+    private var hasEmptySearchResult: Bool {
+        let term = model.searchQuery.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !term.isEmpty, !store.clips.isEmpty else { return false }
+        return !store.clips.contains { $0.text.localizedCaseInsensitiveContains(term) }
     }
 
     private func handleDistributionChange() {
