@@ -559,6 +559,16 @@ private struct GalaxyView: View {
             }
             .padding(20)
 
+            if let item = model.selectedItem {
+                selectionOrbit(
+                    item.entry,
+                    sphereDiameter: radius * 2,
+                    canvasSize: geometry.size
+                )
+                .transition(selectionTransition)
+            }
+
+            // 调参面板必须在选中轨道/时间线之上：否则全屏 Canvas 会拦截滑杆的点击
             if showTuning {
                 tuningPanel
                     .padding(.leading, 24)
@@ -568,15 +578,6 @@ private struct GalaxyView: View {
                         alignment: .topLeading
                     )
                     .padding(.top, 70)
-            }
-
-            if let item = model.selectedItem {
-                selectionOrbit(
-                    item.entry,
-                    sphereDiameter: radius * 2,
-                    canvasSize: geometry.size
-                )
-                .transition(selectionTransition)
             }
         }
         .animation(selectionAnimation, value: model.selectedItem?.clipId)
