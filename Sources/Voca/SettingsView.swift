@@ -30,6 +30,8 @@ struct SettingsView: View {
     @State private var confirmingClearLibrary = false
     @AppStorage("listFontSize") private var listFontSize = Typography.listDefault
     @AppStorage("popupFontSize") private var popupFontSize = Typography.popupDefault
+    @AppStorage("popupWidth") private var popupWidth = 400.0
+    @AppStorage("popupReadingHeight") private var readingHeight = 148.0
 
     private var databaseURL: URL { ClipStore.defaultURL() }
 
@@ -76,15 +78,46 @@ struct SettingsView: View {
         Section("外观") {
             fontSizeRow("列表字号", value: $listFontSize, caption: "应用于词库与剪贴板列表、时间线及编辑面板")
             fontSizeRow("浮窗字号", value: $popupFontSize, caption: "应用于查词与翻译浮窗")
+            settingSliderRow(
+                "浮窗宽度", value: $popupWidth, range: 360...560,
+                caption: "查词与翻译浮窗的宽度（360–560pt），高度随内容自适应"
+            )
+            settingSliderRow(
+                "阅读区高度", value: $readingHeight, range: 120...480,
+                caption: "释义与学习区块的阅读区高度；浮窗总高 = 固定框架 + 此值，内容超出则滚动"
+            )
+            previewRow
         }
     }
 
     private func fontSizeRow(_ title: String, value: Binding<Double>, caption: String) -> some View {
+        settingSliderRow(title, value: value, range: Typography.range, caption: caption)
+    }
+
+    /// 内嵌实时预览：示例词 inspect（带词根/家族/短语/同义词全区块），
+    /// 宽度与字号设置即时生效；窗口不够宽时可拖宽查看完整宽度
+    @ViewBuilder
+    private var previewRow: some View {
+        if let result = DictionaryService.shared.lookup("inspect") {
+            VStack(alignment: .leading, spacing: 6) {
+                Text("预览（示例词 inspect · 发音按钮可直接试听）")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+                DictionaryCardView(result: result)
+                    .frame(width: popupWidth, alignment: .leading)
+            }
+            .padding(.vertical, 2)
+        }
+    }
+
+    private func settingSliderRow(
+        _ title: String, value: Binding<Double>, range: ClosedRange<Double>, caption: String
+    ) -> some View {
         VStack(alignment: .leading, spacing: 4) {
             HStack {
                 Text(title)
                 Spacer()
-                Slider(value: value, in: Typography.range, step: 1)
+                Slider(value: value, in: range, step: 1)
                     .frame(width: 150)
                 Text("\(Int(value.wrappedValue)) pt")
                     .monospacedDigit()

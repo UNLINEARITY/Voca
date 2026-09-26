@@ -136,7 +136,7 @@ final class LookupPopupController: NSObject {
                 onSave: { [weak self] note in self?.saveToLibrary(note: note) }
             )
         )
-        let contentSize = hostView.fittingSize
+        hostView.autoresizingMask = [.width, .height]
 
         let panel = acquirePanel()
         installDismissMonitors()
@@ -148,7 +148,7 @@ final class LookupPopupController: NSObject {
             ?? NSRect(x: 0, y: 0, width: 1440, height: 900)
         let frame = Self.popupFrame(
             cursor: cursor,
-            size: contentSize,
+            size: hostView.fittingSize,
             visibleFrame: visibleFrame
         )
         panel.setFrame(frame, display: true)
@@ -284,6 +284,7 @@ private struct LookupPopupView: View {
     var allowSave = true
     let onSave: (String?) -> Void
     @AppStorage("popupFontSize") private var popupFontSize = Typography.popupDefault
+    @AppStorage("popupWidth") private var popupWidth = 400.0
     @State private var saved = false
     @State private var translationResult: String?
 
@@ -334,7 +335,7 @@ private struct LookupPopupView: View {
             }
         }
         .padding(12)
-        .frame(width: 400, alignment: .leading)
+        .frame(width: popupWidth, alignment: .leading)
         .floatingSurface()
     }
 

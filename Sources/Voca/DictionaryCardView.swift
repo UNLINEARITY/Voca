@@ -21,9 +21,20 @@ import SwiftUI
 /// 查词浮窗内的词典卡片：词头、音标、英/美发音、释义与标签。
 /// 内容过长时释义区内部滚动，卡片整体不撑开容器。
 /// 只渲染内容，浮层材质由容器提供（LookupPopupView 的 `floatingSurface`）。
+extension DictionaryEnrichment.RootPart {
+    /// 徽章角色色：后缀紫（"-ion" 类）、前缀橙（"in-1" 类）、词根强调色
+    var badgeColor: Color {
+        if key.hasPrefix("-") { return .purple }
+        if key.contains("-") { return .orange }
+        return .accentColor
+    }
+}
+
 struct DictionaryCardView: View {
     let result: DictionaryLookupResult
     @AppStorage("popupFontSize") private var popupFontSize = Typography.popupDefault
+    /// 释义与学习区块的阅读区高度（设置滑杆直接控制，浮窗总高随此值联动）
+    @AppStorage("popupReadingHeight") private var readingHeight = 148.0
 
     private var entry: DictionaryEntry { result.entry }
 
@@ -49,7 +60,7 @@ struct DictionaryCardView: View {
                 }
                 .frame(maxWidth: .infinity, alignment: .leading)
             }
-            .frame(maxHeight: 148)
+            .frame(height: readingHeight)
         }
     }
 
@@ -156,12 +167,23 @@ struct DictionaryCardView: View {
                     .foregroundStyle(.secondary)
                 Spacer()
             }
-            // in-(进入) + spect(看) + -ion(名词)
-            Text(roots.map { part in
-                "\(part.displayName)(\(part.meaning))"
-            }.joined(separator: " + "))
-                .font(.system(size: popupFontSize))
-                .textSelection(.enabled)
+            // 徽章行：前缀橙 / 词根强调色 / 后缀紫，颜色区分部件角色
+            HStack(spacing: 4) {
+                ForEach(Array(roots.enumerated()), id: \.offset) { index, part in
+                    if index > 0 {
+                        Text("+")
+                            .font(.system(size: Typography.derived(popupFontSize, offset: -1)))
+                            .foregroundStyle(.tertiary)
+                    }
+                    Text("\(part.displayName) \(part.meaning)")
+                        .font(.system(size: Typography.derived(popupFontSize, offset: -1), weight: .semibold))
+                        .padding(.horizontal, 6)
+                        .padding(.vertical, 2)
+                        .background(Capsule().fill(part.badgeColor))
+                        .foregroundStyle(.white)
+                        .textSelection(.enabled)
+                }
+            }
             let origin = roots.map(\.origin).filter { !$0.isEmpty }.sorted().first ?? ""
             let examples = roots.flatMap(\.examples)
                 .filter { $0.lowercased() != entry.word.lowercased() }
@@ -181,7 +203,8 @@ struct DictionaryCardView: View {
     private func sectionLabel(_ title: String) -> some View {
         Text(title)
             .font(.caption)
-            .foregroundStyle(.secondary)
+            .fontWeight(.semibold)
+            .foregroundStyle(.primary)
     }
 
     @ViewBuilder
