@@ -24,14 +24,12 @@ import SwiftUI
 /// 内容用系统设置同款的 Form(.grouped) 分组。与菜单栏设置项双入口共存。
 struct SettingsView: View {
     @EnvironmentObject private var store: ClipStore
-    @EnvironmentObject private var watcher: ClipboardWatcher
-    @ObservedObject private var model = AppModel.shared
 
     @State private var stats: LibraryInfo.Stats?
     @State private var databaseBytes: Int64 = 0
     @State private var confirmingClearLibrary = false
-    @AppStorage("listFontSize") private var listFontSize = 13.0
-    @AppStorage("popupFontSize") private var popupFontSize = 13.0
+    @AppStorage("listFontSize") private var listFontSize = Typography.listDefault
+    @AppStorage("popupFontSize") private var popupFontSize = Typography.popupDefault
 
     private var databaseURL: URL { ClipStore.defaultURL() }
 
@@ -68,30 +66,7 @@ struct SettingsView: View {
 
     private var generalSection: some View {
         Section("通用") {
-            Toggle(isOn: $model.showsDockIcon) {
-                Label("在 Dock 显示图标", systemImage: "dock.rectangle")
-            }
-            Toggle(isOn: $watcher.isEnabled) {
-                Label("记录剪贴板历史", systemImage: "doc.on.clipboard")
-            }
-            Toggle(isOn: $model.threeFingerSaveEnabled) {
-                Label("三指下滑保存（实验性）", systemImage: "hand.draw")
-            }
-            if model.threeFingerSaveEnabled {
-                Text(gestureStatusText)
-                    .font(.caption)
-                    .foregroundStyle(.secondary)
-                    .fixedSize(horizontal: false, vertical: true)
-            }
-        }
-    }
-
-    private var gestureStatusText: String {
-        switch model.threeFingerSaveStatus {
-        case .off: return ""
-        case .unavailable: return "当前系统不支持触控板监听；保存快捷键仍可使用。"
-        case .waiting: return "等待内建或外接触控板；保存快捷键仍可使用。"
-        case .ready: return "若与 App Exposé 冲突，请在系统设置中手动改为四指下滑或关闭该手势。"
+            SharedToggleRows()
         }
     }
 
@@ -109,7 +84,7 @@ struct SettingsView: View {
             HStack {
                 Text(title)
                 Spacer()
-                Slider(value: value, in: 11...18, step: 1)
+                Slider(value: value, in: Typography.range, step: 1)
                     .frame(width: 150)
                 Text("\(Int(value.wrappedValue)) pt")
                     .monospacedDigit()
@@ -126,9 +101,7 @@ struct SettingsView: View {
 
     private var shortcutSection: some View {
         Section("快捷键") {
-            KeyboardShortcuts.Recorder("保存选中文字：", name: .saveSelection)
-            KeyboardShortcuts.Recorder("查词 / 翻译：", name: .lookupWord)
-            KeyboardShortcuts.Recorder("打开工作区：", name: .openGalaxy)
+            SharedShortcutRows()
         }
     }
 
@@ -152,12 +125,14 @@ struct SettingsView: View {
                 } label: {
                     Label("导出 Markdown…", systemImage: "square.and.arrow.down")
                 }
+                .disabled(store.clips.isEmpty)
                 Spacer()
                 Button(role: .destructive) {
                     confirmingClearLibrary = true
                 } label: {
                     Label("清空词库…", systemImage: "trash")
                 }
+                .disabled(store.clips.isEmpty)
             }
         }
     }
@@ -265,4 +240,40 @@ struct SettingsView: View {
         }
     }
 
+}
+
+// MARK: - 双入口共用控件
+
+/// 菜单栏面板与工作区设置页共用的三个开关行：
+/// 标签、图标与三指下滑状态文案都只维护一处，两个入口不再各自漂移。
+struct SharedToggleRows: View {
+    @ObservedObject private var model = AppModel.shared
+    @EnvironmentObject private var watcher: ClipboardWatcher
+
+    var body: some View {
+        Toggle(isOn: $model.showsDockIcon) {
+            Label("在 Dock 显示图标", systemImage: "dock.rectangle")
+        }
+        Toggle(isOn: $watcher.isEnabled) {
+            Label("记录剪贴板历史", systemImage: "doc.on.clipboard")
+        }
+        Toggle(isOn: $model.threeFingerSaveEnabled) {
+            Label("三指下滑保存（实验性）", systemImage: "hand.draw")
+        }
+        if model.threeFingerSaveEnabled {
+            Text(model.gestureStatusText)
+                .font(.caption)
+                .foregroundStyle(.secondary)
+                .fixedSize(horizontal: false, vertical: true)
+        }
+    }
+}
+
+/// 菜单栏面板与工作区设置页共用的快捷键录制行（标签与顺序只维护一处）
+struct SharedShortcutRows: View {
+    var body: some View {
+        KeyboardShortcuts.Recorder("保存选中文字：", name: .saveSelection)
+        KeyboardShortcuts.Recorder("查词 / 翻译：", name: .lookupWord)
+        KeyboardShortcuts.Recorder("打开工作区：", name: .openGalaxy)
+    }
 }

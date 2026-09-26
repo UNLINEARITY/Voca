@@ -18,38 +18,24 @@
 
 import SwiftUI
 
-/// 编辑面板顶部的词典卡片：词头、音标、英/美发音、释义与标签。
+/// 查词浮窗内的词典卡片：词头、音标、英/美发音、释义与标签。
 /// 内容过长时释义区内部滚动，卡片整体不撑开容器。
-/// 查词浮窗以 `showsBackground: false` 复用，由容器自行提供背景。
+/// 只渲染内容，浮层材质由容器提供（LookupPopupView 的 `floatingSurface`）。
 struct DictionaryCardView: View {
     let result: DictionaryLookupResult
-    var showsBackground = true
-    @AppStorage("popupFontSize") private var popupFontSize = 13.0
+    @AppStorage("popupFontSize") private var popupFontSize = Typography.popupDefault
 
     private var entry: DictionaryEntry { result.entry }
 
     var body: some View {
-        if showsBackground {
-            cardContent
-                .padding(10)
-                .background(
-                    RoundedRectangle(cornerRadius: 8)
-                        .fill(Color(nsColor: .windowBackgroundColor))
-                )
-                .overlay(
-                    RoundedRectangle(cornerRadius: 8)
-                        .strokeBorder(.quaternary, lineWidth: 1)
-                )
-        } else {
-            cardContent
-        }
+        cardContent
     }
 
     private var cardContent: some View {
         VStack(alignment: .leading, spacing: 6) {
             HStack(alignment: .firstTextBaseline) {
                 Text(entry.word)
-                    .font(.system(size: popupFontSize + 3, weight: .bold))
+                    .font(.system(size: Typography.derived(popupFontSize, offset: 3), weight: .bold))
                 Text(DictionaryService.prettifiedPhonetic(entry.phonetic))
                     .font(.system(size: popupFontSize))
                     .foregroundStyle(.secondary)
@@ -101,9 +87,9 @@ struct DictionaryCardView: View {
             Divider().padding(.vertical, 1)
             HStack(alignment: .firstTextBaseline, spacing: 4) {
                 Text(lemma.word)
-                    .font(.system(size: popupFontSize + 1, weight: .bold))
+                    .font(.system(size: Typography.derived(popupFontSize, offset: 1), weight: .bold))
                 Text(DictionaryService.prettifiedPhonetic(lemma.phonetic))
-                    .font(.system(size: popupFontSize - 2))
+                    .font(.system(size: Typography.derived(popupFontSize, offset: -2)))
                     .foregroundStyle(.secondary)
             }
             senseBlock(lemma)

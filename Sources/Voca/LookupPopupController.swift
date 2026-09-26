@@ -159,10 +159,11 @@ final class LookupPopupController: NSObject {
         panel?.orderOut(nil)
     }
 
-    /// 点击面板外部（任意 App）即消失；监视器常驻，仅在面板可见时生效，
-    /// 回调内不做拆除，避免在自身回调里同步移除监视器。
+    /// 点击面板外部（任意 App）即消失，ESC 亦可关闭；监视器常驻，仅在面板可见时
+    /// 生效，回调内不做拆除，避免在自身回调里同步移除监视器。
     private func installDismissMonitors() {
-        guard dismissGlobalMonitor == nil, dismissLocalMonitor == nil else { return }
+        guard dismissGlobalMonitor == nil, dismissLocalMonitor == nil, escapeMonitor == nil
+        else { return }
         let handler: (NSEvent) -> Void = { [weak self] _ in
             MainActor.assumeIsolated { self?.dismissIfClickedOutside() }
         }
@@ -176,10 +177,24 @@ final class LookupPopupController: NSObject {
             handler(event)
             return event
         }
+        // 非激活面板只有自身为 key window 时才会收到本地按键（如从词库双击打开后
+        // 点进浮窗），因此 ESC 作为补充入口，与星图的 ESC 行为对齐
+        escapeMonitor = NSEvent.addLocalMonitorForEvents(matching: .keyDown) { [weak self] event in
+            guard event.keyCode == 53 else { return event }
+            let handled = MainActor.assumeIsolated { self?.closeOnEscape() == true }
+            return handled ? nil : event
+        }
     }
 
     private var dismissGlobalMonitor: Any?
     private var dismissLocalMonitor: Any?
+    private var escapeMonitor: Any?
+
+    private func closeOnEscape() -> Bool {
+        guard let panel, panel.isVisible, NSApp.keyWindow === panel else { return false }
+        panel.orderOut(nil)
+        return true
+    }
 
     private func dismissIfClickedOutside() {
         guard let panel, panel.isVisible else { return }
@@ -268,7 +283,7 @@ private struct LookupPopupView: View {
     let content: LookupContent
     var allowSave = true
     let onSave: (String?) -> Void
-    @AppStorage("popupFontSize") private var popupFontSize = 13.0
+    @AppStorage("popupFontSize") private var popupFontSize = Typography.popupDefault
     @State private var saved = false
     @State private var translationResult: String?
 
@@ -276,14 +291,14 @@ private struct LookupPopupView: View {
         VStack(spacing: 8) {
             switch content {
             case .card(let result):
-                DictionaryCardView(result: result, showsBackground: false)
+                DictionaryCardView(result: result)
             case .translation(let original, let direction):
                 VStack(alignment: .leading, spacing: 4) {
                     Text("原文")
                         .font(.caption)
                         .foregroundStyle(.secondary)
                     Text(original)
-                        .font(.system(size: popupFontSize + 1))
+                        .font(.system(size: Typography.derived(popupFontSize, offset: 1)))
                         .fixedSize(horizontal: false, vertical: true)
                         .textSelection(.enabled)
                 }
@@ -320,15 +335,7 @@ private struct LookupPopupView: View {
         }
         .padding(12)
         .frame(width: 400, alignment: .leading)
-        .background(
-            RoundedRectangle(cornerRadius: 12, style: .continuous)
-                .fill(.regularMaterial)
-                .shadow(color: .black.opacity(0.22), radius: 10, y: 3)
-        )
-        .overlay(
-            RoundedRectangle(cornerRadius: 12, style: .continuous)
-                .strokeBorder(.quaternary, lineWidth: 1)
-        )
+        .floatingSurface()
     }
 
     /// 英/美发音按钮（仅对非空英文文本显示）

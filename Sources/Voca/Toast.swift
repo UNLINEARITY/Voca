@@ -147,15 +147,7 @@ private struct ToastView: View {
             .font(.system(size: 13, weight: .medium))
             .padding(.horizontal, 14)
             .padding(.vertical, 9)
-            .background(
-                RoundedRectangle(cornerRadius: 10, style: .continuous)
-                    .fill(.regularMaterial)
-                    .shadow(color: .black.opacity(0.18), radius: 8, y: 2)
-            )
-            .overlay(
-                RoundedRectangle(cornerRadius: 10, style: .continuous)
-                    .strokeBorder(.quaternary, lineWidth: 1)
-            )
+            .floatingSurface()
             .frame(maxWidth: 320)
             .fixedSize()
             .onAppear {

@@ -27,10 +27,10 @@ enum WorkspaceTab: String, CaseIterable, Identifiable {
     case clipboard
 
     var id: String { rawValue }
-    /// 标签对应的星图档：设置 ↔ 折射，词库 ↔ 词库，剪贴板 ↔ 剪贴板
+    /// 标签对应的星图档：设置 ↔ 检索，词库 ↔ 词库，剪贴板 ↔ 剪贴板
     var galaxySource: GalaxySource {
         switch self {
-        case .settings: .refraction
+        case .settings: .search
         case .library: .library
         case .clipboard: .clipboard
         }
@@ -135,6 +135,12 @@ final class WorkspaceNavigation: ObservableObject {
         transition(toGalaxy: true)
     }
 
+    /// 星图 → 工作区面板（星图顶栏「返回面板」与 ⇧⌥↑ 共用同一路径）
+    func returnToPanel() {
+        guard GalaxyWindowController.shared.isOpen else { return }
+        transition(toGalaxy: false)
+    }
+
     private func ensurePanelWindow() -> NSWindow {
         if let panelWindow { return panelWindow }
         let content = WorkspacePanelView()
@@ -206,10 +212,10 @@ final class WorkspaceNavigation: ObservableObject {
         let panel = ensurePanelWindow()
         let source = toGalaxy ? tab.galaxySource : galaxy.source
         if !toGalaxy {
-            // 星图回面板：折射档回设置页，其余回对应列表
+            // 星图回面板：检索档回设置页，其余回对应列表
             let backTab: WorkspaceTab = switch source {
             case .clipboard: .clipboard
-            case .refraction: .settings
+            case .search: .settings
             case .library: .library
             }
             setTab(targetTab ?? backTab)
@@ -295,7 +301,7 @@ final class WorkspaceNavigation: ObservableObject {
         glass.state = .active
         glass.autoresizingMask = [.width, .height]
         glass.wantsLayer = true
-        glass.layer?.cornerRadius = sphere ? frame.height / 2 : 18
+        glass.layer?.cornerRadius = sphere ? frame.height / 2 : Radius.panel
         glass.layer?.masksToBounds = true
         glass.layer?.borderColor = NSColor.white.withAlphaComponent(0.45).cgColor
         glass.layer?.borderWidth = 1
@@ -307,7 +313,7 @@ final class WorkspaceNavigation: ObservableObject {
     private func animateGlassShell(to frame: NSRect, becomingSphere: Bool) {
         guard let shell = transitionWindow, let layer = shell.contentView?.layer else { return }
         let oldRadius = layer.cornerRadius
-        let newRadius = becomingSphere ? frame.height / 2 : 18
+        let newRadius = becomingSphere ? frame.height / 2 : Radius.panel
         let rounded = CABasicAnimation(keyPath: "cornerRadius")
         rounded.fromValue = oldRadius
         rounded.toValue = newRadius
@@ -337,7 +343,7 @@ private struct WorkspacePanelView: View {
                     get: { navigation.tab },
                     set: { navigation.setTab($0) }
                 )) {
-                    Label("设置", systemImage: "gearshape").tag(WorkspaceTab.settings)
+                    Text("设置").tag(WorkspaceTab.settings)
                     Text("词库").tag(WorkspaceTab.library)
                     Text("剪贴板").tag(WorkspaceTab.clipboard)
                 }

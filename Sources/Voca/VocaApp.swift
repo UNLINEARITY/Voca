@@ -73,6 +73,16 @@ final class AppModel: ObservableObject {
         clipboardWatcher = ClipboardWatcher(store: store)
     }
 
+    /// 三指下滑监听状态说明：菜单栏面板与设置页共用同一份文案
+    var gestureStatusText: String {
+        switch threeFingerSaveStatus {
+        case .off: return ""
+        case .unavailable: return "当前系统不支持触控板监听；保存快捷键仍可使用。"
+        case .waiting: return "等待内建或外接触控板；保存快捷键仍可使用。"
+        case .ready: return "若与 App Exposé 冲突，请在系统设置中手动改为四指下滑或关闭该手势。"
+        }
+    }
+
     func startGestureMonitorIfNeeded() {
         TrackpadGestureMonitor.shared.onStatus = { [weak self] status in
             MainActor.assumeIsolated { self?.threeFingerSaveStatus = status }
@@ -256,8 +266,6 @@ private enum VocaMenuBarArtwork {
 
 struct MenuBarView: View {
     @EnvironmentObject private var store: ClipStore
-    @EnvironmentObject private var watcher: ClipboardWatcher
-    @ObservedObject private var model = AppModel.shared
 
     var body: some View {
         VStack(alignment: .leading, spacing: 10) {
@@ -273,41 +281,24 @@ struct MenuBarView: View {
 
             Divider()
 
-            KeyboardShortcuts.Recorder("保存快捷键：", name: .saveSelection)
-            KeyboardShortcuts.Recorder("工作区快捷键：", name: .openGalaxy)
-            KeyboardShortcuts.Recorder("查词快捷键：", name: .lookupWord)
+            // 与工作区设置页共用同一套控件与文案，避免双入口各自漂移
+            SharedShortcutRows()
 
-            Toggle(isOn: $model.threeFingerSaveEnabled) {
-                Label("三指下滑保存（实验性）", systemImage: "hand.draw")
-            }
-            if model.threeFingerSaveEnabled {
-                Text(gestureStatusText)
-                    .font(.caption)
-                    .foregroundStyle(.secondary)
-                    .fixedSize(horizontal: false, vertical: true)
-            }
-
-            Toggle(isOn: $watcher.isEnabled) {
-                Label("记录剪贴板历史", systemImage: "doc.on.clipboard")
-            }
-
-            Toggle(isOn: $model.showsDockIcon) {
-                Label("在 Dock 显示图标", systemImage: "dock.rectangle")
-            }
+            SharedToggleRows()
 
             Divider()
 
             Button {
                 WorkspaceNavigation.shared.toggleGalaxy()
             } label: {
-                Label("星图模式", systemImage: "sparkles")
+                Label("星图", systemImage: "sparkles")
                     .frame(maxWidth: .infinity, alignment: .leading)
             }
 
             Button {
                 WorkspaceNavigation.shared.openPanel(.library)
             } label: {
-                Label("查看全部记录", systemImage: "list.bullet.rectangle")
+                Label("词库", systemImage: "list.bullet.rectangle")
                     .frame(maxWidth: .infinity, alignment: .leading)
             }
 
@@ -328,15 +319,6 @@ struct MenuBarView: View {
         .padding(12)
         .frame(width: 260)
     }
-
-    private var gestureStatusText: String {
-        switch model.threeFingerSaveStatus {
-        case .off: return ""
-        case .unavailable: return "当前系统不支持触控板监听；保存快捷键仍可使用。"
-        case .waiting: return "等待内建或外接触控板；保存快捷键仍可使用。"
-        case .ready: return "若与 App Exposé 冲突，请在系统设置中手动改为四指下滑或关闭该手势。"
-        }
-    }
 }
 
 // MARK: - 记录窗口
@@ -354,14 +336,15 @@ struct RecordsView: View {
         NavigationStack {
             Group {
                 if store.clips.isEmpty {
-                    Text(
-                        search.isEmpty
-                            ? "还没有记录\n在任意 App 选中文字，按保存快捷键试试"
-                            : "没有匹配的记录"
+                    ContentUnavailableView(
+                        search.isEmpty ? "词库还是空的" : "没有匹配的词条",
+                        systemImage: search.isEmpty ? "list.bullet.rectangle" : "magnifyingglass",
+                        description: Text(
+                            search.isEmpty
+                                ? "在任意 App 选中文字，按保存快捷键，它就会出现在这里。"
+                                : "换个关键词试试。"
+                        )
                     )
-                    .multilineTextAlignment(.center)
-                    .foregroundStyle(.secondary)
-                    .frame(maxWidth: .infinity, maxHeight: .infinity)
                 } else {
                     List(store.clips) { clip in
                         ClipRow(
@@ -379,7 +362,7 @@ struct RecordsView: View {
                     .listStyle(.inset)
                 }
             }
-            .navigationTitle("Voca 记录")
+            .navigationTitle("词库")
             .searchable(text: $search, placement: .toolbar, prompt: "搜索全文")
             .onChange(of: search) { _, newValue in
                 // 防抖 200ms：连续古键只触发一次后台查询，不卡输入
@@ -403,7 +386,7 @@ struct RecordsView: View {
                     Button(role: .destructive) {
                         confirmingClearAll = true
                     } label: {
-                        Label("清空全部", systemImage: "trash")
+                        Label("清空词库", systemImage: "trash")
                     }
                     .disabled(store.clips.isEmpty)
                 }
@@ -423,7 +406,7 @@ struct RecordsView: View {
                 ClipTimelineSheet(clip: clip)
             }
             .confirmationDialog(
-                "删除这条记录？",
+                "删除这个词条？",
                 isPresented: .init(
                     get: { deletingClip != nil },
                     set: { if !$0 { deletingClip = nil } }
@@ -438,19 +421,19 @@ struct RecordsView: View {
                     deletingClip = nil
                 }
             } message: {
-                Text("将同时删除该记录的时间线事件")
+                Text("将同时删除该词条的时间线事件")
             }
             .confirmationDialog(
-                "清空全部记录？",
+                "清空词库？",
                 isPresented: $confirmingClearAll,
                 titleVisibility: .visible
             ) {
-                Button("清空全部（不可恢复）", role: .destructive) {
+                Button("清空词库（不可恢复）", role: .destructive) {
                     store.deleteAll()
                 }
                 Button("取消", role: .cancel) {}
             } message: {
-                Text("将永久删除全部 \(store.clips.count) 条记录及其时间线")
+                Text("将永久删除全部 \(store.clips.count) 个词条及其时间线")
             }
         }
     }
@@ -478,8 +461,9 @@ struct ClipRow: View {
     var onDelete: () -> Void
     @EnvironmentObject private var store: ClipStore
     @EnvironmentObject private var watcher: ClipboardWatcher
-    @AppStorage("listFontSize") private var listFontSize = 13.0
+    @AppStorage("listFontSize") private var listFontSize = Typography.listDefault
     @State private var expanded = false
+    @State private var isTruncated = false
 
     var body: some View {
         VStack(alignment: .leading, spacing: 6) {
@@ -488,11 +472,19 @@ struct ClipRow: View {
                 .lineLimit(expanded ? nil : 5)
                 .truncationMode(.tail)
                 .textSelection(.enabled)
+                .background(
+                    TruncationProbe(
+                        text: clip.text,
+                        fontSize: listFontSize,
+                        maxLines: 5,
+                        isTruncated: $isTruncated
+                    )
+                )
 
             // 备注浅灰显示，行数跟随备注本身（不截断）
             if let note = clip.note, !note.isEmpty {
                 Text(note)
-                    .font(.system(size: listFontSize - 1))
+                    .font(.system(size: Typography.derived(listFontSize, offset: -1)))
                     .foregroundStyle(.secondary)
                     .textSelection(.enabled)
             }
@@ -507,13 +499,16 @@ struct ClipRow: View {
                 }
                 Spacer()
                 Text(clip.lastSeenAt.formatted(date: .abbreviated, time: .shortened))
-                Button {
-                    expanded.toggle()
-                } label: {
-                    Image(systemName: expanded ? "chevron.up" : "chevron.down")
+                // 仅当文本确实被行数上限截断时才提供展开/收起
+                if isTruncated {
+                    Button {
+                        expanded.toggle()
+                    } label: {
+                        Image(systemName: expanded ? "chevron.up" : "chevron.down")
+                    }
+                    .buttonStyle(.borderless)
+                    .help(expanded ? "收起" : "展开全文")
                 }
-                .buttonStyle(.borderless)
-                .help(expanded ? "收起" : "展开全文")
                 Button {
                     watcher.copyText(clip.text)
                 } label: {
@@ -586,7 +581,7 @@ struct EditClipSheet: View {
     let clip: Clip
     let onSave: (String, String?) -> Void
     @Environment(\.dismiss) private var dismiss
-    @AppStorage("listFontSize") private var listFontSize = 13.0
+    @AppStorage("listFontSize") private var listFontSize = Typography.listDefault
     @State private var text: String
     @State private var note: String
 
@@ -640,9 +635,9 @@ struct EditClipSheet: View {
             .frame(maxHeight: .infinity)
             .padding(4)
             .background(Color(nsColor: .textBackgroundColor))
-            .cornerRadius(6)
+            .cornerRadius(Radius.inline)
             .overlay(
-                RoundedRectangle(cornerRadius: 6)
+                RoundedRectangle(cornerRadius: Radius.inline)
                     .strokeBorder(.quaternary, lineWidth: 1)
             )
     }
@@ -653,7 +648,7 @@ struct ClipTimelineSheet: View {
     let clip: Clip
     @EnvironmentObject private var store: ClipStore
     @Environment(\.dismiss) private var dismiss
-    @AppStorage("listFontSize") private var listFontSize = 13.0
+    @AppStorage("listFontSize") private var listFontSize = Typography.listDefault
     @State private var events: [ClipEvent] = []
 
     var body: some View {

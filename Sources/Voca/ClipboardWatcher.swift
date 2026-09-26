@@ -343,9 +343,10 @@ final class ClipboardWatcher: ObservableObject {
 
 struct ClipboardHistoryView: View {
     @EnvironmentObject private var watcher: ClipboardWatcher
-    @AppStorage("listFontSize") private var listFontSize = 13.0
+    @AppStorage("listFontSize") private var listFontSize = Typography.listDefault
     @State private var promotedIDs: Set<UUID> = []
     @State private var expandedIDs: Set<UUID> = []
+    @State private var truncatedIDs: Set<UUID> = []
     @State private var deletingEntry: ClipboardEntry?
     @State private var confirmingClear = false
 
@@ -353,14 +354,15 @@ struct ClipboardHistoryView: View {
         NavigationStack {
             Group {
                 if watcher.entries.isEmpty {
-                    Text(
-                        watcher.isEnabled
-                            ? "暂无剪贴板记录\n复制的内容会出现在这里；点 ➕ 将文本收入词库"
-                            : "剪贴板记录已关闭\n可在菜单栏 Voca 图标中开启"
+                    ContentUnavailableView(
+                        watcher.isEnabled ? "暂无剪贴板记录" : "剪贴板记录已关闭",
+                        systemImage: "clipboard",
+                        description: Text(
+                            watcher.isEnabled
+                                ? "复制的内容会出现在这里；点 ➕ 可将文本收入词库。"
+                                : "可在菜单栏 Voca 图标或设置页中开启。"
+                        )
                     )
-                    .multilineTextAlignment(.center)
-                    .foregroundStyle(.secondary)
-                    .frame(maxWidth: .infinity, maxHeight: .infinity)
                 } else {
                     List(watcher.entries) { entry in
                         row(entry)
@@ -374,13 +376,13 @@ struct ClipboardHistoryView: View {
                     Button(role: .destructive) {
                         confirmingClear = true
                     } label: {
-                        Label("清空", systemImage: "trash")
+                        Label("清空剪贴板", systemImage: "trash")
                     }
                     .disabled(watcher.entries.isEmpty)
                 }
             }
             .confirmationDialog(
-                "移除这条记录？",
+                "移除这条剪贴板记录？",
                 isPresented: .init(
                     get: { deletingEntry != nil },
                     set: { if !$0 { deletingEntry = nil } }
@@ -421,7 +423,7 @@ struct ClipboardHistoryView: View {
                 Label(entry.appName ?? "未知来源", systemImage: "app.dashed")
                 Spacer()
                 Text(entry.date.formatted(date: .omitted, time: .standard))
-                if entry.isText {
+                if entry.isText, truncatedIDs.contains(entry.id) {
                     Button {
                         if expanded {
                             expandedIDs.remove(entry.id)
@@ -441,7 +443,7 @@ struct ClipboardHistoryView: View {
                         Image(systemName: "doc.on.doc")
                     }
                     .buttonStyle(.borderless)
-                    .help("复制到剪贴板")
+                    .help("复制全文")
                 }
                 if entry.isText {
                     let promoted = promotedIDs.contains(entry.id)
@@ -453,7 +455,7 @@ struct ClipboardHistoryView: View {
                     }
                     .buttonStyle(.borderless)
                     .disabled(promoted)
-                    .help(promoted ? "已入库" : "加入词库")
+                    .help(promoted ? "已入库" : "收入词库")
                 }
                 Button {
                     deletingEntry = entry
@@ -489,6 +491,14 @@ struct ClipboardHistoryView: View {
                 .lineLimit(expanded ? nil : 5)
                 .truncationMode(.tail)
                 .textSelection(.enabled)
+                .background(
+                    TruncationProbe(
+                        text: text,
+                        fontSize: listFontSize,
+                        maxLines: 5,
+                        isTruncated: truncationBinding(entry.id)
+                    )
+                )
         } else if let files = entry.fileNames {
             Label(
                 files.count == 1 ? files[0] : "\(files.count) 个文件",
@@ -519,16 +529,30 @@ struct ClipboardHistoryView: View {
                 }
             }
             .frame(maxHeight: 64)
-            .cornerRadius(4)
+            .cornerRadius(Radius.inline)
             .task(id: id) { image = await watcher.imagePreview(for: id) }
         }
+    }
+
+    /// 该行文本是否被行数上限截断（决定是否显示展开按钮）
+    private func truncationBinding(_ id: UUID) -> Binding<Bool> {
+        Binding(
+            get: { truncatedIDs.contains(id) },
+            set: { truncated in
+                if truncated {
+                    truncatedIDs.insert(id)
+                } else {
+                    truncatedIDs.remove(id)
+                }
+            }
+        )
     }
 
     private func save(_ entry: ClipboardEntry) {
         do {
             // 入库时间 = 复制时间；同文本合并计数；入库后保留剪贴板记录
             guard let clip = try watcher.promote(entry) else { return }
-            ToastController.shared.show(clip.count > 1 ? "已入库（第 \(clip.count) 次）" : "已加入词库")
+            ToastController.shared.show(clip.count > 1 ? "已入库（第 \(clip.count) 次）" : "已收入词库")
             promotedIDs.insert(entry.id)
         } catch {
             ToastController.shared.show("入库失败：\(error.localizedDescription)")

@@ -79,8 +79,8 @@ final class GalaxyTuning: ObservableObject {
 // MARK: - 球面数据
 
 enum GalaxySource: String, CaseIterable {
-    /// 空间顺序即切换顺序:折射(左)↔词库(中)↔剪贴板(右)
-    case refraction
+    /// 空间顺序即切换顺序:检索(左)↔词库(中)↔剪贴板(右)
+    case search
     case library
     case clipboard
 }
@@ -169,7 +169,7 @@ final class GalaxyModel: ObservableObject {
     @Published var selectedItem: GalaxyItem?
     /// 双击词条发出的编辑请求(GalaxyView 监听后弹出编辑面板;剪贴板条目无编辑界面,忽略)
     @Published var pendingEdit: GalaxyItem?
-    @Published var refractionQuery = ""
+    @Published var searchQuery = ""
     @Published var source: GalaxySource = GalaxySource(
         rawValue: UserDefaults.standard.string(forKey: "galaxyLastSource") ?? ""
     ) ?? .library {
@@ -388,8 +388,8 @@ final class GalaxyWindowController {
             model.rebuild(from: AppModel.shared.store.clips)
         case .clipboard:
             model.rebuild(fromClipboard: AppModel.shared.clipboardWatcher.entries)
-        case .refraction:
-            let term = model.refractionQuery.trimmingCharacters(in: .whitespacesAndNewlines)
+        case .search:
+            let term = model.searchQuery.trimmingCharacters(in: .whitespacesAndNewlines)
             let clips = term.isEmpty ? [] : AppModel.shared.store.clips.filter {
                 $0.text.localizedCaseInsensitiveContains(term)
             }
@@ -527,7 +527,7 @@ private struct GalaxyView: View {
             editSheet(for: clip)
         }
         .confirmationDialog(
-            deletingClipboard ? "移除这条剪贴板历史？" : "删除这条词库记录？",
+            deletingClipboard ? "移除这条剪贴板记录？" : "删除这个词条？",
             isPresented: deletingEntryBinding,
             titleVisibility: .visible
         ) {
@@ -548,11 +548,11 @@ private struct GalaxyView: View {
             VStack {
                 topBar
                 Spacer()
-                if model.source == .refraction {
-                    refractionSearchBar
+                if model.source == .search {
+                    searchBar
                         .padding(.bottom, 10)
-                        .onChange(of: model.refractionQuery) { _, query in
-                            applyRefractionQuery(query)
+                        .onChange(of: model.searchQuery) { _, query in
+                            applySearchQuery(query)
                         }
                 }
                 selectionDetail(availableWidth: geometry.size.width)
@@ -608,9 +608,9 @@ private struct GalaxyView: View {
             model.pendingSourceSwitch = nil
         }
         switch source {
-        case .refraction:
-            // 折射 = 词库检索视图:按当前关键词过滤词库
-            model.rebuild(from: refractionFilteredClips(), announceSampling: false)
+        case .search:
+            // 检索 = 词库检索视图:按当前关键词过滤词库
+            model.rebuild(from: searchFilteredClips(), announceSampling: false)
         case .library:
             model.rebuild(from: store.clips)
         case .clipboard:
@@ -659,7 +659,7 @@ private struct GalaxyView: View {
     @ViewBuilder
     private var deleteDialogActions: some View {
         Button(
-            deletingClipboard ? "移除剪贴板记录" : "删除词库记录（不可恢复）",
+            deletingClipboard ? "移除剪贴板记录" : "删除词条（不可恢复）",
             role: .destructive
         ) {
             deleteSelectedEntry()
@@ -673,7 +673,7 @@ private struct GalaxyView: View {
         Text(
             deletingClipboard
                 ? "仅从剪贴板历史移除，不影响已入库的词条。"
-                : "将永久删除该词库记录及其全部时间线事件，不影响剪贴板历史。")
+                : "将永久删除该词条及其全部时间线事件，不影响剪贴板历史。")
     }
 
     /// 双击词条 → 弹出编辑面板(剪贴板条目无编辑界面,忽略)
@@ -697,7 +697,7 @@ private struct GalaxyView: View {
     }
 
     private func sphere(diameter: CGFloat) -> some View {
-        // 三种源共用同一套球体视觉(磨砂核 + 折射透镜环);折射模式仅在内容上不同
+        // 三种源共用同一套球体视觉(磨砂核 + 折射透镜环);检索模式仅在内容上不同
         let lensDiameter = diameter * tuning.ringScale
         let radius = diameter / 2
         return ZStack {
@@ -761,14 +761,14 @@ private struct GalaxyView: View {
                             ? "星图还是空的"
                             : model.source == .clipboard
                                 ? "暂无剪贴板文字"
-                                : model.refractionQuery.isEmpty ? "输入关键词检索" : "没有匹配的词条",
+                                : model.searchQuery.isEmpty ? "输入关键词检索" : "没有匹配的词条",
                         systemImage: "sparkles",
                         description: Text(
                             model.source == .library
                                 ? "保存一些文字后，它们会出现在这里。"
                                 : model.source == .clipboard
                                     ? "复制文字后，它会出现在这里；图片和文件仍可在剪贴板历史中查看。"
-                                    : model.refractionQuery.isEmpty
+                                    : model.searchQuery.isEmpty
                                         ? "在下方输入关键词，球面会显示词库中匹配的词条。"
                                         : "换个关键词试试。"
                         )
@@ -785,13 +785,19 @@ private struct GalaxyView: View {
 
     // MARK: 顶部与提示
 
+    /// 星图界面文字倍率：跟随「文字大小」滑块，但夹在受控区间内，
+    /// 球面文字仍使用滑块的完整范围
+    private var chromeScale: CGFloat {
+        Typography.galaxyChromeScale(model.fontScale)
+    }
+
     private var topBar: some View {
         GlassEffectContainer(spacing: 12) {
             HStack(spacing: 12) {
                 HStack(spacing: 9) {
                     Image(systemName: "sparkles")
                     Text("Voca 星图")
-                        .fontWeight(.semibold)
+                        .font(.system(size: 13 * chromeScale, weight: .semibold))
                     Text("\(model.items.count) 条")
                         .font(.caption)
                         .foregroundStyle(.secondary)
@@ -804,7 +810,7 @@ private struct GalaxyView: View {
                 Spacer()
 
                 Picker("星图内容", selection: $model.source) {
-                    Text("折射").tag(GalaxySource.refraction)
+                    Text("检索").tag(GalaxySource.search)
                     Text("词库").tag(GalaxySource.library)
                     Text("剪贴板").tag(GalaxySource.clipboard)
                 }
@@ -820,6 +826,16 @@ private struct GalaxyView: View {
                 }
                 .buttonStyle(.glass)
                 .help("实时调参")
+
+                // 与面板上的「星图」入口对称：星图侧也提供可见的返回入口
+                Button {
+                    WorkspaceNavigation.shared.returnToPanel()
+                } label: {
+                    Text("返回面板")
+                        .frame(height: 20)
+                }
+                .buttonStyle(.glass)
+                .help("回到工作区面板（⇧⌥↑）")
 
                 Button {
                     GalaxyWindowController.shared.close()
@@ -859,20 +875,20 @@ private struct GalaxyView: View {
                 }
             }
             selectionActions(item.entry)
-        } else if model.source != .refraction {
+        } else if model.source != .search {
             hintBar
         }
     }
 
-    /// 折射模式:球下方的词库检索框;聚焦时方向键保留原生文本编辑行为
-    private var refractionSearchBar: some View {
+    /// 检索模式:球下方的词库检索框;聚焦时方向键保留原生文本编辑行为
+    private var searchBar: some View {
         HStack(spacing: 8) {
             Image(systemName: "magnifyingglass")
-            TextField("输入关键词，检索词库（回车开始）", text: $model.refractionQuery)
+            TextField("输入关键词，检索词库（回车开始）", text: $model.searchQuery)
                 .textFieldStyle(.plain)
-            if !model.refractionQuery.isEmpty {
+            if !model.searchQuery.isEmpty {
                 Button {
-                    model.refractionQuery = ""
+                    model.searchQuery = ""
                 } label: {
                     Image(systemName: "xmark.circle.fill")
                         .foregroundStyle(.secondary)
@@ -888,19 +904,19 @@ private struct GalaxyView: View {
         .frame(maxWidth: 340)
     }
 
-    private func refractionFilteredClips() -> [Clip] {
-        let term = model.refractionQuery.trimmingCharacters(in: .whitespacesAndNewlines)
+    private func searchFilteredClips() -> [Clip] {
+        let term = model.searchQuery.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !term.isEmpty else { return [] }
         return store.clips.filter { $0.text.localizedCaseInsensitiveContains(term) }
     }
 
-    private func applyRefractionQuery(_ query: String) {
-        guard model.source == .refraction else { return }
-        model.rebuild(from: refractionFilteredClips(), announceSampling: false)
+    private func applySearchQuery(_ query: String) {
+        guard model.source == .search else { return }
+        model.rebuild(from: searchFilteredClips(), announceSampling: false)
     }
 
     private var hintBar: some View {
-        Text("拖拽或双指滑动旋转 · 滚轮/捏合/调参调整字号 · 单击词条展开轨道 · 双击查词 · ESC 退出")
+        Text("拖拽或双指滑动旋转 · 滚轮/捏合/调参调整字号 · 单击词条展开轨道 · 双击查词 · ⇧⌥↑ 返回面板 · ESC 退出")
             .font(.caption)
             .foregroundStyle(.secondary)
             .padding(.horizontal, 16)
@@ -914,15 +930,16 @@ private struct GalaxyView: View {
         label: String = "注释"
     ) -> some View {
         let width = min(560, max(220, availableWidth - 48))
+        let fontSize = 14 * chromeScale
         let textHeight = (note as NSString).boundingRect(
             with: CGSize(width: width - 36, height: .greatestFiniteMagnitude),
             options: [.usesLineFragmentOrigin, .usesFontLeading],
-            attributes: [.font: NSFont.systemFont(ofSize: 14)]
+            attributes: [.font: NSFont.systemFont(ofSize: fontSize)]
         ).height
 
         return ScrollView(.vertical) {
             Text(note)
-                .font(.system(size: 14))
+                .font(.system(size: fontSize))
                 .foregroundStyle(.primary)
                 .frame(maxWidth: .infinity, alignment: .leading)
                 .fixedSize(horizontal: false, vertical: true)
@@ -933,7 +950,7 @@ private struct GalaxyView: View {
         .frame(width: width, height: min(160, max(44, ceil(textHeight) + 28)))
         .glassEffect(
             .regular,
-            in: RoundedRectangle(cornerRadius: 16, style: .continuous)
+            in: RoundedRectangle(cornerRadius: Radius.panel, style: .continuous)
         )
         .padding(.bottom, 12)
         .accessibilityLabel(label)
@@ -992,6 +1009,9 @@ private struct GalaxyView: View {
                 Divider()
 
                 tuningSlider("文字大小", value: $model.fontScale, range: 0.5...2.5, format: "%.2f×")
+                Text("作用于星图内全部文字；列表与浮窗字号在设置页调整")
+                    .font(.caption2)
+                    .foregroundStyle(.secondary)
                 tuningSlider("球体大小", value: $tuning.sphereScale, range: 0.25...0.48, format: "%.2f")
                 tuningSlider("环宽倍数", value: $tuning.ringScale, range: 1.05...1.6, format: "%.2f")
                 tuningSlider("磨砂中心暗度", value: $tuning.coreDarkCenter, range: 0...0.4, format: "%.2f")
@@ -1003,7 +1023,7 @@ private struct GalaxyView: View {
         .frame(maxHeight: 430)
         .glassEffect(
             .regular.interactive(),
-            in: RoundedRectangle(cornerRadius: 20, style: .continuous)
+            in: RoundedRectangle(cornerRadius: Radius.panel, style: .continuous)
         )
     }
 
@@ -1158,7 +1178,7 @@ private struct GalaxyView: View {
                 orbitAttribute(
                     title: "时间线",
                     value: timelineEvents.isEmpty ? "无记录" : "\(timelineEvents.count) 次记录",
-                    systemImage: "clock.arrow.trianglehead.counterclockwise.rotate.90",
+                    systemImage: "clock.arrow.circlepath",
                     side: .right,
                     action: timelineEvents.isEmpty ? nil : {
                         withAnimation(selectionAnimation) {
@@ -1260,7 +1280,7 @@ private struct GalaxyView: View {
                     )
                     .frame(width: sideWidth)
                     .overlay {
-                        RoundedRectangle(cornerRadius: 12, style: .continuous)
+                        RoundedRectangle(cornerRadius: Radius.card, style: .continuous)
                             .strokeBorder(Color.accentColor.opacity(selected ? 0.65 : 0), lineWidth: 1)
                     }
                     .position(
@@ -1358,10 +1378,10 @@ private struct GalaxyView: View {
 
             VStack(alignment: side == .left ? .trailing : .leading, spacing: 3) {
                 Text(title)
-                    .font(.system(size: 17, weight: .semibold))
+                    .font(.system(size: 17 * chromeScale, weight: .semibold))
                     .foregroundStyle(.primary)
                 Text(value)
-                    .font(.system(size: 15, weight: .semibold))
+                    .font(.system(size: 15 * chromeScale, weight: .semibold))
                     .foregroundStyle(.primary)
                     .lineLimit(lineLimit)
                     .truncationMode(.tail)
@@ -1384,7 +1404,7 @@ private struct GalaxyView: View {
         )
         .glassEffect(
             interactive ? .regular.interactive() : .regular,
-            in: RoundedRectangle(cornerRadius: 12, style: .continuous)
+            in: RoundedRectangle(cornerRadius: Radius.card, style: .continuous)
         )
         .contentShape(Rectangle())
         .accessibilityElement(children: .ignore)
@@ -1393,7 +1413,11 @@ private struct GalaxyView: View {
     }
 
     private func selectionActions(_ entry: GalaxyEntry) -> some View {
-        GlassEffectContainer(spacing: 10) {
+        let isClipboardEntry: Bool = {
+            if case .clipboard = entry { return true }
+            return false
+        }()
+        return GlassEffectContainer(spacing: 10) {
             HStack(spacing: 10) {
                 if model.isTimelineVisible, case .library = entry {
                     Button {
@@ -1450,11 +1474,11 @@ private struct GalaxyView: View {
                     Button {
                         watcher.copyText(entry.text)
                     } label: {
-                        Image(systemName: "document.on.document")
+                        Image(systemName: "doc.on.doc")
                             .frame(width: 20, height: 20)
                     }
                     .buttonStyle(.glassProminent)
-                    .help(model.source == .clipboard ? "复制文字" : "复制词条")
+                    .help("复制全文")
 
                     switch entry {
                     case .library(let clip):
@@ -1472,11 +1496,14 @@ private struct GalaxyView: View {
                         } label: {
                             Image(systemName: promotedIDs.contains(clipboard.id)
                                 ? "checkmark.circle.fill" : "plus.circle.fill")
+                                .foregroundStyle(
+                                    promotedIDs.contains(clipboard.id) ? .green : .accentColor
+                                )
                                 .frame(width: 20, height: 20)
                         }
                         .buttonStyle(.glass)
                         .disabled(promotedIDs.contains(clipboard.id))
-                        .help(promotedIDs.contains(clipboard.id) ? "已加入词库" : "加入词库")
+                        .help(promotedIDs.contains(clipboard.id) ? "已入库" : "收入词库")
                     }
 
                     if let urlString = entry.url, let url = URL(string: urlString) {
@@ -1493,14 +1520,13 @@ private struct GalaxyView: View {
                     Button(role: .destructive) {
                         deletingEntry = entry
                     } label: {
-                        Image(systemName: "trash")
+                        // 与列表一致：词库为删除，剪贴板为移除
+                        Image(systemName: isClipboardEntry ? "xmark.circle" : "trash")
                             .frame(width: 20, height: 20)
                     }
                     .buttonStyle(.glass)
-                    .help(model.source == .clipboard ? "移除剪贴板记录" : "删除词库记录")
-                    .accessibilityLabel(
-                        model.source == .clipboard ? "移除剪贴板记录" : "删除词库记录"
-                    )
+                    .help(isClipboardEntry ? "移除剪贴板记录" : "删除词条")
+                    .accessibilityLabel(isClipboardEntry ? "移除剪贴板记录" : "删除词条")
                 }
             }
         }
@@ -1515,7 +1541,7 @@ private struct GalaxyView: View {
         do {
             guard let clip = try watcher.promote(entry) else { return }
             promotedIDs.insert(entry.id)
-            ToastController.shared.show(clip.count > 1 ? "已入库（第 \(clip.count) 次）" : "已加入词库")
+            ToastController.shared.show(clip.count > 1 ? "已入库（第 \(clip.count) 次）" : "已收入词库")
         } catch {
             ToastController.shared.show("入库失败：\(error.localizedDescription)")
         }

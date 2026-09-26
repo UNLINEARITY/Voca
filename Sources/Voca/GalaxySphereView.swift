@@ -101,9 +101,9 @@ final class GalaxySceneView: SCNView {
     }
 
     override func keyDown(with event: NSEvent) {
-        // 回车:折射模式 → 聚焦检索框;其他模式 → 编辑选中词条
+        // 回车:检索模式 → 聚焦检索框;其他模式 → 编辑选中词条
         if event.keyCode == kVK_Return || event.keyCode == kVK_ANSI_KeypadEnter {
-            if interactionCoordinator?.model?.source == .refraction {
+            if interactionCoordinator?.model?.source == .search {
                 interactionCoordinator?.focusSearchField()
             } else {
                 interactionCoordinator?.editSelection()
@@ -366,10 +366,10 @@ final class GalaxySceneCoordinator: NSObject {
         model?.pendingEdit = item
     }
 
-    /// 折射模式下聚焦检索框:直接定位窗口内唯一的可编辑文本控件(SwiftUI TextField
+    /// 检索模式下聚焦检索框:直接定位窗口内唯一的可编辑文本控件(SwiftUI TextField
     /// 的宿主 NSTextField)并设为 first responder,同步完成、不依赖焦点接力
     func focusSearchField() {
-        guard let model, model.source == .refraction,
+        guard let model, model.source == .search,
               let window = view?.window,
               let field = firstEditableTextField(in: window.contentView)
         else { return }
