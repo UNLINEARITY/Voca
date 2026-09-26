@@ -103,6 +103,13 @@ enum GalaxyEntry: Equatable {
         }
     }
 
+    var bundleID: String? {
+        switch self {
+        case .library(let clip): clip.appBundleID
+        case .clipboard(let entry): entry.appBundleID
+        }
+    }
+
     var url: String? {
         switch self {
         case .library(let clip): clip.url
@@ -785,25 +792,19 @@ private struct GalaxyView: View {
 
     // MARK: 顶部与提示
 
-    /// 星图界面文字倍率：跟随「文字大小」滑块，但夹在受控区间内，
-    /// 球面文字仍使用滑块的完整范围
-    private var chromeScale: CGFloat {
-        Typography.galaxyChromeScale(model.fontScale)
-    }
-
     private var topBar: some View {
         GlassEffectContainer(spacing: 12) {
             HStack(spacing: 12) {
                 HStack(spacing: 9) {
                     Image(systemName: "sparkles")
                     Text("Voca 星图")
-                        .font(.system(size: 13 * chromeScale, weight: .semibold))
+                        .font(.system(size: 13, weight: .semibold))
                     Text("\(model.items.count) 条")
                         .font(.caption)
                         .foregroundStyle(.secondary)
                 }
-                .padding(.leading, 15)
-                .padding(.trailing, 17)
+                .padding(.leading, 16)
+                .padding(.trailing, 16)
                 .padding(.vertical, 10)
                 .glassEffect(.regular, in: Capsule())
 
@@ -897,7 +898,7 @@ private struct GalaxyView: View {
                 .help("清空")
             }
         }
-        .font(.caption)
+        .font(.system(size: 13))
         .padding(.horizontal, 14)
         .padding(.vertical, 9)
         .glassEffect(.regular, in: Capsule())
@@ -916,8 +917,8 @@ private struct GalaxyView: View {
     }
 
     private var hintBar: some View {
-        Text("拖拽或双指滑动旋转 · 滚轮/捏合/调参调整字号 · 单击词条展开轨道 · 双击查词 · ⇧⌥↑ 返回面板 · ESC 退出")
-            .font(.caption)
+        Text("拖拽或双指滑动旋转 · ESC 退出")
+            .font(.system(size: 12))
             .foregroundStyle(.secondary)
             .padding(.horizontal, 16)
             .padding(.vertical, 9)
@@ -930,7 +931,7 @@ private struct GalaxyView: View {
         label: String = "注释"
     ) -> some View {
         let width = min(560, max(220, availableWidth - 48))
-        let fontSize = 14 * chromeScale
+        let fontSize: CGFloat = 14
         let textHeight = (note as NSString).boundingRect(
             with: CGSize(width: width - 36, height: .greatestFiniteMagnitude),
             options: [.usesLineFragmentOrigin, .usesFontLeading],
@@ -1009,7 +1010,7 @@ private struct GalaxyView: View {
                 Divider()
 
                 tuningSlider("文字大小", value: $model.fontScale, range: 0.5...2.5, format: "%.2f×")
-                Text("作用于星图内全部文字；列表与浮窗字号在设置页调整")
+                Text("作用于球面文字；星图界面文字为固定字号，列表与浮窗字号在设置页调整")
                     .font(.caption2)
                     .foregroundStyle(.secondary)
                 tuningSlider("球体大小", value: $tuning.sphereScale, range: 0.25...0.48, format: "%.2f")
@@ -1138,6 +1139,7 @@ private struct GalaxyView: View {
                 title: "来源应用",
                 value: entry.appName ?? "未知来源",
                 systemImage: "app.dashed",
+                appBundleID: entry.bundleID,
                 side: .left
             )
             .frame(width: sideWidth)
@@ -1341,6 +1343,7 @@ private struct GalaxyView: View {
                     title: title,
                     value: value,
                     systemImage: systemImage,
+                    appBundleID: nil,
                     side: side,
                     lineLimit: lineLimit,
                     interactive: true
@@ -1353,6 +1356,7 @@ private struct GalaxyView: View {
                 title: title,
                 value: value,
                 systemImage: systemImage,
+                appBundleID: nil,
                 side: side,
                 lineLimit: lineLimit,
                 interactive: false
@@ -1360,28 +1364,47 @@ private struct GalaxyView: View {
         }
     }
 
+    /// 「来源应用」卡带真实应用图标的重载
+    @ViewBuilder
+    private func orbitAttribute(
+        title: String,
+        value: String,
+        systemImage: String,
+        appBundleID: String?,
+        side: GalaxyOrbitSide
+    ) -> some View {
+        orbitAttributeContent(
+            title: title,
+            value: value,
+            systemImage: systemImage,
+            appBundleID: appBundleID,
+            side: side,
+            lineLimit: 1,
+            interactive: false
+        )
+    }
+
     private func orbitAttributeContent(
         title: String,
         value: String,
         systemImage: String,
+        appBundleID: String?,
         side: GalaxyOrbitSide,
         lineLimit: Int,
         interactive: Bool
     ) -> some View {
         HStack(spacing: 9) {
             if side == .right {
-                Image(systemName: systemImage)
-                    .foregroundStyle(.secondary)
-                    .frame(width: 18)
+                orbitIcon(systemImage: systemImage, appBundleID: appBundleID)
                     .accessibilityHidden(true)
             }
 
             VStack(alignment: side == .left ? .trailing : .leading, spacing: 3) {
                 Text(title)
-                    .font(.system(size: 17 * chromeScale, weight: .semibold))
+                    .font(.system(size: 15, weight: .semibold))
                     .foregroundStyle(.primary)
                 Text(value)
-                    .font(.system(size: 15 * chromeScale, weight: .semibold))
+                    .font(.system(size: 13, weight: .semibold))
                     .foregroundStyle(.primary)
                     .lineLimit(lineLimit)
                     .truncationMode(.tail)
@@ -1389,9 +1412,7 @@ private struct GalaxyView: View {
             }
 
             if side == .left {
-                Image(systemName: systemImage)
-                    .foregroundStyle(.secondary)
-                    .frame(width: 18)
+                orbitIcon(systemImage: systemImage, appBundleID: appBundleID)
                     .accessibilityHidden(true)
             }
         }
@@ -1410,6 +1431,20 @@ private struct GalaxyView: View {
         .accessibilityElement(children: .ignore)
         .accessibilityLabel(title)
         .accessibilityValue(value)
+    }
+
+    /// 轨道卡图标：来源应用卡用真实 App 图标，其余用符号
+    @ViewBuilder
+    private func orbitIcon(systemImage: String, appBundleID: String?) -> some View {
+        if let nsImage = SourceAppIcon.nsImage(bundleID: appBundleID) {
+            Image(nsImage: nsImage)
+                .resizable()
+                .frame(width: 16, height: 16)
+        } else {
+            Image(systemName: systemImage)
+                .foregroundStyle(.secondary)
+                .frame(width: 18)
+        }
     }
 
     private func selectionActions(_ entry: GalaxyEntry) -> some View {
@@ -1444,7 +1479,7 @@ private struct GalaxyView: View {
                     .help("查看较新的记录")
 
                     Text("\(model.timelinePage + 1) / \(model.timelinePageCount)")
-                        .font(.caption.monospacedDigit())
+                        .font(.system(size: 12).monospacedDigit())
                         .foregroundStyle(.secondary)
 
                     Button {

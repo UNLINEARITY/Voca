@@ -37,12 +37,6 @@ enum Typography {
     static func derived(_ base: Double, offset: Double) -> CGFloat {
         CGFloat(max(minimum, base + offset))
     }
-
-    /// 星图界面文字（属性轨道、注释、顶栏标题）跟随「文字大小」滑块的倍率。
-    /// 球面文字允许 0.5–2.5 倍；界面文字只在受控区间内缩放，避免极端倍率撑坏排版。
-    static func galaxyChromeScale(_ fontScale: Double) -> CGFloat {
-        CGFloat(min(max(fontScale, 0.85), 1.5))
-    }
 }
 
 /// 圆角：按容器角色取值，不再逐处写字面量
@@ -77,6 +71,65 @@ struct FloatingSurface: ViewModifier {
 extension View {
     func floatingSurface(cornerRadius: CGFloat = Radius.card) -> some View {
         modifier(FloatingSurface(cornerRadius: cornerRadius))
+    }
+}
+
+/// 来源 App 真实图标：按 bundleID 向系统索取应用图标并缓存，
+/// 取不到（老记录或已卸载）时回落 app.dashed 符号。
+@MainActor
+enum SourceAppIcon {
+    private static var cache: [String: NSImage] = [:]
+
+    static func nsImage(bundleID: String?) -> NSImage? {
+        guard let bundleID, !bundleID.isEmpty else { return nil }
+        if let cached = cache[bundleID] { return cached }
+        guard let appURL = NSWorkspace.shared.urlForApplication(withBundleIdentifier: bundleID)
+        else { return nil }
+        let icon = NSWorkspace.shared.icon(forFile: appURL.path)
+        cache[bundleID] = icon
+        return icon
+    }
+
+    /// 行内「图标 + 来源名」，替换原先恒为占位符的 Label
+    static func label(name: String?, bundleID: String?, size: CGFloat = 14) -> some View {
+        HStack(spacing: 5) {
+            iconImage(bundleID: bundleID, size: size)
+            Text(name ?? "未知来源")
+        }
+    }
+
+    @ViewBuilder
+    static func iconImage(bundleID: String?, size: CGFloat) -> some View {
+        if let nsImage = nsImage(bundleID: bundleID) {
+            Image(nsImage: nsImage)
+                .resizable()
+                .frame(width: size, height: size)
+        } else {
+            Image(systemName: "app.dashed")
+                .frame(width: size, height: size)
+        }
+    }
+}
+
+/// 来源网页小字：恒显下划线提示可点，悬停转主色（原先毫无可点击提示）
+struct SourceLinkText: View {
+    let urlString: String
+    @State private var hovering = false
+
+    var body: some View {
+        Text(urlString)
+            .font(.caption2)
+            .foregroundStyle(hovering ? Color.accentColor : Color.secondary)
+            .underline()
+            .lineLimit(1)
+            .truncationMode(.middle)
+            .contentShape(Rectangle())
+            .onHover { hovering = $0 }
+            .onTapGesture {
+                if let url = URL(string: urlString) {
+                    NSWorkspace.shared.open(url)
+                }
+            }
     }
 }
 

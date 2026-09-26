@@ -101,7 +101,8 @@ final class ToastController {
         panel.backgroundColor = .clear
         panel.level = .statusBar
         panel.collectionBehavior = [.canJoinAllSpaces, .ignoresCycle, .fullScreenAuxiliary]
-        panel.hasShadow = true
+        // 浮层阴影由 FloatingSurface 自绘，关掉窗口阴影避免两层叠加发闷
+        panel.hasShadow = false
         panel.ignoresMouseEvents = true
         self.panel = panel
         return panel

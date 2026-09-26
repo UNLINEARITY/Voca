@@ -76,7 +76,7 @@ struct DictionaryCardView: View {
                         accent == .british ? "英" : "美",
                         systemImage: "speaker.wave.2"
                     )
-                    .font(.callout)
+                    .font(.system(size: popupFontSize))
                 }
                 .buttonStyle(.borderless)
                 .help(accent == .british ? "英音朗读" : "美音朗读")
@@ -268,7 +268,7 @@ struct DictionaryCardView: View {
             } else {
                 Text(parts.joined(separator: " · "))
                     .font(.caption)
-                    .foregroundStyle(.tertiary)
+                    .foregroundStyle(.secondary)
                     .padding(.top, 1)
             }
         }

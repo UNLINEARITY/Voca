@@ -104,7 +104,7 @@ struct SettingsView: View {
                     .font(.caption)
                     .foregroundStyle(.secondary)
                 DictionaryCardView(result: result)
-                    .frame(width: popupWidth, alignment: .leading)
+                    .frame(maxWidth: popupWidth, alignment: .leading)
             }
             .padding(.vertical, 2)
         }
@@ -118,7 +118,7 @@ struct SettingsView: View {
                 Text(title)
                 Spacer()
                 Slider(value: value, in: range, step: 1)
-                    .frame(width: 150)
+                    .frame(width: 240)
                 Text("\(Int(value.wrappedValue)) pt")
                     .monospacedDigit()
                     .foregroundStyle(.secondary)
@@ -288,15 +288,19 @@ struct SharedToggleRows: View {
         Toggle(isOn: $model.showsDockIcon) {
             Label("在 Dock 显示图标", systemImage: "dock.rectangle")
         }
+        .toggleStyle(.switch)
         Toggle(isOn: $watcher.isEnabled) {
             Label("记录剪贴板历史", systemImage: "doc.on.clipboard")
         }
+        .toggleStyle(.switch)
         Toggle(isOn: $model.threeFingerSaveEnabled) {
             Label("三指下滑保存（实验性）", systemImage: "hand.draw")
         }
+        .toggleStyle(.switch)
         Toggle(isOn: $rootDecompositionEnabled) {
             Label("词根智能拆解", systemImage: "text.badget.star")
         }
+        .toggleStyle(.switch)
         if model.threeFingerSaveEnabled {
             Text(model.gestureStatusText)
                 .font(.caption)

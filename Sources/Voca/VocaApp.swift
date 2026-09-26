@@ -309,7 +309,7 @@ struct MenuBarView: View {
                     .frame(maxWidth: .infinity, alignment: .leading)
             }
 
-            Button(role: .destructive) {
+            Button {
                 NSApp.terminate(nil)
             } label: {
                 Label("退出 Voca", systemImage: "power")
@@ -490,7 +490,7 @@ struct ClipRow: View {
             }
 
             HStack(spacing: 8) {
-                Label(clip.appName ?? "未知来源", systemImage: "app.dashed")
+                SourceAppIcon.label(name: clip.appName, bundleID: clip.appBundleID)
                 if clip.count > 1 {
                     Text("×\(clip.count)")
                         .padding(.horizontal, 5)
@@ -499,6 +499,7 @@ struct ClipRow: View {
                 }
                 Spacer()
                 Text(clip.lastSeenAt.formatted(date: .abbreviated, time: .shortened))
+                    .lineLimit(1)
                 // 仅当文本确实被行数上限截断时才提供展开/收起
                 if isTruncated {
                     Button {
@@ -542,15 +543,8 @@ struct ClipRow: View {
             .foregroundStyle(.secondary)
 
             // 来源网页：浅灰小字显示在来源行下方，点击打开
-            if let urlString = clip.url, let url = URL(string: urlString) {
-                Text(urlString)
-                    .font(.caption2)
-                    .foregroundStyle(.secondary)
-                    .lineLimit(1)
-                    .truncationMode(.middle)
-                    .onTapGesture {
-                        NSWorkspace.shared.open(url)
-                    }
+            if let urlString = clip.url, URL(string: urlString) != nil {
+                SourceLinkText(urlString: urlString)
             }
         }
         .padding(.vertical, 4)
@@ -628,16 +622,16 @@ struct EditClipSheet: View {
         .frame(width: 460, height: 440)
     }
 
-    /// 多行编辑框：与其他编辑区均分空间，内容过多时内部滚动
+    /// 多行编辑框：与其他编辑区均分空间，内容过多时内部滚动。
+    /// 不额外包 padding：TextEditor 自带内边距，避免文字与标签左缘错位。
     private func editor(text: Binding<String>) -> some View {
         TextEditor(text: text)
             .font(.system(size: listFontSize))
             .frame(maxHeight: .infinity)
-            .padding(4)
             .background(Color(nsColor: .textBackgroundColor))
-            .cornerRadius(Radius.inline)
+            .clipShape(RoundedRectangle(cornerRadius: Radius.inline, style: .continuous))
             .overlay(
-                RoundedRectangle(cornerRadius: Radius.inline)
+                RoundedRectangle(cornerRadius: Radius.inline, style: .continuous)
                     .strokeBorder(.quaternary, lineWidth: 1)
             )
     }
@@ -657,7 +651,7 @@ struct ClipTimelineSheet: View {
                 .font(.headline)
 
             Text(clip.text)
-                .font(.system(size: 12))
+                .font(.system(size: listFontSize))
                 .foregroundStyle(.secondary)
                 .lineLimit(2)
 
@@ -684,8 +678,6 @@ struct ClipTimelineSheet: View {
                             .buttonStyle(.borderless)
                             .help("打开来源网页：\(urlString)")
                         }
-                        Image(systemName: "app.dashed")
-                            .foregroundStyle(.quaternary)
                     }
                     .font(.system(size: listFontSize))
                 }

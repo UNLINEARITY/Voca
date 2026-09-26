@@ -351,9 +351,13 @@ private struct WorkspacePanelView: View {
                 .labelsHidden()
                 .frame(width: 300)
                 Spacer()
-                Text("⇧⌥←→ 切换 · ⇧⌥↓ 星图")
-                    .font(.caption)
-                    .foregroundStyle(.secondary)
+                // 窗口不够宽时自动隐藏快捷键提示，避免折行挤压
+                ViewThatFits(in: .horizontal) {
+                    Text("⇧⌥←→ 切换 · ⇧⌥↓ 星图")
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                    EmptyView()
+                }
                 Button {
                     navigation.openGalaxyForPanel()
                 } label: {

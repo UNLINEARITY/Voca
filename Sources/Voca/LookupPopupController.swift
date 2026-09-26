@@ -215,7 +215,8 @@ final class LookupPopupController: NSObject {
         panel.backgroundColor = .clear
         panel.level = .floating
         panel.collectionBehavior = [.canJoinAllSpaces, .ignoresCycle, .fullScreenAuxiliary]
-        panel.hasShadow = true
+        // 浮层阴影由 FloatingSurface 自绘，关掉窗口阴影避免两层叠加发闷
+        panel.hasShadow = false
         panel.ignoresMouseEvents = false
         self.panel = panel
         return panel
@@ -326,7 +327,7 @@ private struct LookupPopupView: View {
                             saved ? "已入库" : "收入词库",
                             systemImage: saved ? "checkmark.circle.fill" : "plus.circle"
                         )
-                        .font(.callout)
+                        .font(.system(size: popupFontSize))
                     }
                     .buttonStyle(.borderless)
                     .disabled(saved)
@@ -352,7 +353,7 @@ private struct LookupPopupView: View {
                                 accent == .british ? "英" : "美",
                                 systemImage: "speaker.wave.2"
                             )
-                            .font(.callout)
+                            .font(.system(size: popupFontSize))
                         }
                         .buttonStyle(.borderless)
                         .help(accent == .british ? "英音朗读" : "美音朗读")

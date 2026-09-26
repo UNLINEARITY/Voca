@@ -359,7 +359,7 @@ struct ClipboardHistoryView: View {
                         systemImage: "clipboard",
                         description: Text(
                             watcher.isEnabled
-                                ? "复制的内容会出现在这里；点 ➕ 可将文本收入词库。"
+                                ? "复制的内容会出现在这里；点行尾的加号按钮可收入词库。"
                                 : "可在菜单栏 Voca 图标或设置页中开启。"
                         )
                     )
@@ -404,7 +404,7 @@ struct ClipboardHistoryView: View {
                 isPresented: $confirmingClear,
                 titleVisibility: .visible
             ) {
-                Button("清空", role: .destructive) {
+                Button("清空（不可恢复）", role: .destructive) {
                     watcher.clear()
                 }
                 Button("取消", role: .cancel) {}
@@ -420,9 +420,10 @@ struct ClipboardHistoryView: View {
             content(entry, expanded: expanded)
 
             HStack(spacing: 8) {
-                Label(entry.appName ?? "未知来源", systemImage: "app.dashed")
+                SourceAppIcon.label(name: entry.appName, bundleID: entry.appBundleID)
                 Spacer()
-                Text(entry.date.formatted(date: .omitted, time: .standard))
+                Text(Self.historyTimeText(entry.date))
+                    .lineLimit(1)
                 if entry.isText, truncatedIDs.contains(entry.id) {
                     Button {
                         if expanded {
@@ -443,7 +444,7 @@ struct ClipboardHistoryView: View {
                         Image(systemName: "doc.on.doc")
                     }
                     .buttonStyle(.borderless)
-                    .help("复制全文")
+                    .help(entry.isImage ? "复制图片" : "复制全文")
                 }
                 if entry.isText {
                     let promoted = promotedIDs.contains(entry.id)
@@ -469,15 +470,8 @@ struct ClipboardHistoryView: View {
             .foregroundStyle(.secondary)
 
             // 来源网页：浅灰小字显示在来源行下方，点击打开
-            if let urlString = entry.url, let url = URL(string: urlString) {
-                Text(urlString)
-                    .font(.caption2)
-                    .foregroundStyle(.secondary)
-                    .lineLimit(1)
-                    .truncationMode(.middle)
-                    .onTapGesture {
-                        NSWorkspace.shared.open(url)
-                    }
+            if let urlString = entry.url, URL(string: urlString) != nil {
+                SourceLinkText(urlString: urlString)
             }
         }
         .padding(.vertical, 4)
@@ -529,9 +523,18 @@ struct ClipboardHistoryView: View {
                 }
             }
             .frame(maxHeight: 64)
-            .cornerRadius(Radius.inline)
+            .clipShape(RoundedRectangle(cornerRadius: Radius.inline, style: .continuous))
             .task(id: id) { image = await watcher.imagePreview(for: id) }
         }
+    }
+
+    /// 历史时间：今天显时刻，昨天标注“昨天”，更早带日期；均不带秒
+    private static func historyTimeText(_ date: Date) -> String {
+        let calendar = Calendar.current
+        let time = date.formatted(date: .omitted, time: .shortened)
+        if calendar.isDateInToday(date) { return time }
+        if calendar.isDateInYesterday(date) { return "昨天 " + time }
+        return date.formatted(date: .abbreviated, time: .shortened)
     }
 
     /// 该行文本是否被行数上限截断（决定是否显示展开按钮）
