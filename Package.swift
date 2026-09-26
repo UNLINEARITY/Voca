@@ -17,7 +17,11 @@ let package = Package(
                 .product(name: "GRDB", package: "GRDB.swift"),
                 .product(name: "KeyboardShortcuts", package: "KeyboardShortcuts"),
             ],
-            path: "Sources/Voca"
+            path: "Sources/Voca",
+            resources: [
+                // 内嵌只读词典（scripts/make_dictionary.py 生成）
+                .copy("Resources/dictionary.sqlite"),
+            ]
         ),
         .testTarget(
             name: "VocaTests",

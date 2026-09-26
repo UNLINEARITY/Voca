@@ -37,6 +37,10 @@ A completed build must contain zero errors and zero warnings.
 | `Sources/Voca/Store.swift` | GRDB schema, migrations, writes, queries, export |
 | `Sources/Voca/Toast.swift` | Non-activating toast panel and save feedback animation |
 | `Sources/Voca/GalaxyView.swift` | Galaxy model, window, rendering, interaction |
+| `Sources/Voca/DictionaryService.swift` | Embedded read-only ECDICT lookup, word detection, display formatting |
+| `Sources/Voca/DictionaryCardView.swift` | Dictionary card in the edit sheet (phonetics, senses, tags, speak buttons) |
+| `Sources/Voca/SpeechService.swift` | Offline system TTS with per-accent best-voice selection |
+| `scripts/make_dictionary.py` | Generates the embedded dictionary.sqlite from the ECDICT CSV |
 | `build.sh` | Release bundle assembly, resources, signing, verification |
 
 Treat this map as navigation, not as an architectural boundary. Update it when responsibilities move.
