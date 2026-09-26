@@ -167,21 +167,27 @@ struct DictionaryCardView: View {
                     .foregroundStyle(.secondary)
                 Spacer()
             }
-            // 徽章行：前缀橙 / 词根强调色 / 后缀紫，颜色区分部件角色
+            // 第一行：纯词根组合徽章（彩底白粗）相连；随后每行「徽章 + 释义」
             HStack(spacing: 4) {
                 ForEach(Array(roots.enumerated()), id: \.offset) { index, part in
                     if index > 0 {
                         Text("+")
-                            .font(.system(size: Typography.derived(popupFontSize, offset: -1)))
+                            .font(.system(size: popupFontSize))
                             .foregroundStyle(.tertiary)
                     }
-                    Text("\(part.displayName) \(part.meaning)")
-                        .font(.system(size: Typography.derived(popupFontSize, offset: -1), weight: .semibold))
-                        .padding(.horizontal, 6)
-                        .padding(.vertical, 2)
-                        .background(Capsule().fill(part.badgeColor))
-                        .foregroundStyle(.white)
-                        .textSelection(.enabled)
+                    rootBadge(part, fontSize: popupFontSize)
+                }
+            }
+            VStack(alignment: .leading, spacing: 2) {
+                ForEach(roots, id: \.key) { part in
+                    HStack(alignment: .firstTextBaseline, spacing: 6) {
+                        rootBadge(part, fontSize: Typography.derived(popupFontSize, offset: -1))
+                        Text(part.meaning.isEmpty ? "—" : part.meaning)
+                            .font(.system(size: Typography.derived(popupFontSize, offset: -1)))
+                            .foregroundStyle(.primary)
+                            .fixedSize(horizontal: false, vertical: true)
+                            .textSelection(.enabled)
+                    }
                 }
             }
             let origin = roots.map(\.origin).filter { !$0.isEmpty }.sorted().first ?? ""
@@ -198,6 +204,18 @@ struct DictionaryCardView: View {
                     .textSelection(.enabled)
             }
         }
+    }
+
+    /// 词根/词缀徽章：实色角色底 + 白色粗体
+    private func rootBadge(
+        _ part: DictionaryEnrichment.RootPart, fontSize: CGFloat
+    ) -> some View {
+        Text(part.displayName)
+            .font(.system(size: fontSize, weight: .bold))
+            .padding(.horizontal, 6)
+            .padding(.vertical, 1.5)
+            .background(Capsule().fill(part.badgeColor))
+            .foregroundStyle(.white)
     }
 
     private func sectionLabel(_ title: String) -> some View {
