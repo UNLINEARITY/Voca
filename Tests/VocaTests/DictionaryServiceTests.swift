@@ -117,17 +117,20 @@ final class DictionaryServiceTests: XCTestCase {
 
     // MARK: - 单词判定
 
-    func testIsLookupableWord() {
-        XCTAssertTrue(DictionaryService.isLookupableWord("hello"))
-        XCTAssertTrue(DictionaryService.isLookupableWord("Serendipity"))
-        XCTAssertTrue(DictionaryService.isLookupableWord("don't"))
-        XCTAssertTrue(DictionaryService.isLookupableWord("well-known"))
-        XCTAssertTrue(DictionaryService.isLookupableWord("‘word.’"))
-        XCTAssertFalse(DictionaryService.isLookupableWord("hello world"))
-        XCTAssertFalse(DictionaryService.isLookupableWord("美丽"))
-        XCTAssertFalse(DictionaryService.isLookupableWord("123"))
-        XCTAssertFalse(DictionaryService.isLookupableWord(""))
-        XCTAssertFalse(DictionaryService.isLookupableWord("a sentence, with punctuation"))
+    func testIsTranslatable() {
+        XCTAssertTrue(DictionaryService.isTranslatable("hello"))
+        XCTAssertTrue(DictionaryService.isTranslatable("look forward to"))
+        XCTAssertTrue(DictionaryService.isTranslatable("The quick brown fox!"))
+        XCTAssertTrue(DictionaryService.isTranslatable("美丽"))
+        XCTAssertFalse(DictionaryService.isTranslatable(""))
+        XCTAssertFalse(DictionaryService.isTranslatable("123"))
+        XCTAssertFalse(DictionaryService.isTranslatable(String(repeating: "a", count: 501)))
+    }
+
+    func testContainsCJK() {
+        XCTAssertTrue(DictionaryService.containsCJK("美丽"))
+        XCTAssertTrue(DictionaryService.containsCJK("hello 世界"))
+        XCTAssertFalse(DictionaryService.containsCJK("hello"))
     }
 
     // MARK: - 展示格式化
@@ -197,19 +200,41 @@ final class LookupPopupLogicTests: XCTestCase {
         try FileManager.default.removeItem(at: dbURL.deletingLastPathComponent())
     }
 
-    func testOutcomeIgnoresNonWordsAndMisses() {
-        // 非单词、空、句子、未命中词 → 全部静默忽略
-        XCTAssertEqual(LookupPopupController.outcome(for: "hello world", service: service), .ignored)
+    func testOutcomeIgnoresUntranslatableInput() {
+        // 空、纯数字、超长 → 静默忽略
         XCTAssertEqual(LookupPopupController.outcome(for: "", service: service), .ignored)
-        XCTAssertEqual(LookupPopupController.outcome(for: "美丽", service: service), .ignored)
-        XCTAssertEqual(LookupPopupController.outcome(for: "nonexistent", service: service), .ignored)
+        XCTAssertEqual(LookupPopupController.outcome(for: "123", service: service), .ignored)
+        XCTAssertEqual(
+            LookupPopupController.outcome(for: String(repeating: "a", count: 501), service: service),
+            .ignored
+        )
     }
 
     func testOutcomeShowsDictionaryHit() {
-        if case .show(let result) = LookupPopupController.outcome(for: "\"Go.\"", service: service) {
+        if case .card(let result) = LookupPopupController.outcome(for: "\"Go.\"", service: service) {
             XCTAssertEqual(result.entry.word, "go")
         } else {
             XCTFail("应命中 go")
+        }
+    }
+
+    func testOutcomeFallsBackToTranslation() {
+        // 词典未命中的英文句子 → 翻译（英→中）
+        if case .translate(let text, let direction) = LookupPopupController.outcome(
+            for: "i like apples", service: service
+        ) {
+            XCTAssertEqual(text, "i like apples")
+            XCTAssertEqual(direction, .englishToChinese)
+        } else {
+            XCTFail("应走翻译")
+        }
+        // 中文 → 翻译（中→英）
+        if case .translate(_, let direction) = LookupPopupController.outcome(
+            for: "今天天气不错", service: service
+        ) {
+            XCTAssertEqual(direction, .chineseToEnglish)
+        } else {
+            XCTFail("中文应走翻译")
         }
     }
 

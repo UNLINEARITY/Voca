@@ -237,6 +237,7 @@ final class ClipStore: ObservableObject {
         appName: String?,
         bundleID: String?,
         url: String? = nil,
+        note: String? = nil,
         date: Date = Date()
     ) throws -> Clip {
         let words = text.components(separatedBy: .whitespacesAndNewlines).filter { !$0.isEmpty }
@@ -251,6 +252,8 @@ final class ClipStore: ObservableObject {
                 existing.count += 1
                 existing.lastSeenAt = date
                 if let url { existing.url = url }
+                // 与 URL 同规则：非空备注采用最新值
+                if let note, !note.isEmpty { existing.note = note }
                 try existing.update(db)
                 if let clipId = existing.id {
                     let event = ClipEvent(
@@ -268,7 +271,7 @@ final class ClipStore: ObservableObject {
                 var clip = Clip(
                     id: nil,
                     text: text,
-                    note: nil,
+                    note: note,
                     appName: appName,
                     appBundleID: bundleID,
                     wordCount: words.count,

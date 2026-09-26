@@ -595,8 +595,7 @@ struct EditClipSheet: View {
         _text = State(initialValue: clip.text)
         _note = State(initialValue: clip.note ?? "")
         _lookupResult = State(
-            initialValue: DictionaryService.isLookupableWord(clip.text)
-                ? DictionaryService.shared.lookup(clip.text) : nil
+            initialValue: DictionaryService.shared.lookup(clip.text)
         )
     }
 

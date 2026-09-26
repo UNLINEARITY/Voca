@@ -125,29 +125,35 @@ final class DictionaryService: @unchecked Sendable {
 
     // MARK: - 文本判定与清洗
 
-    /// 是否是可查词典的“单个英文单词”：
-    /// 清洗后非空、不含空白、至少一个 ASCII 字母、只含字母/数字/'/-/.
-    static func isLookupableWord(_ text: String) -> Bool {
-        let word = normalizedWord(text)
-        guard !word.isEmpty,
-              word.rangeOfCharacter(from: .whitespacesAndNewlines) == nil
-        else { return false }
-        var hasLetter = false
-        for scalar in word.unicodeScalars {
-            switch scalar.value {
-            case 65...90, 97...122:  // A-Z a-z
-                hasLetter = true
-            case 48...57:  // 0-9：允许（如 G7），但不能单独成词
-                continue
-            case UInt32(UInt8(ascii: "'")),
-                 UInt32(UInt8(ascii: "-")),
-                 UInt32(UInt8(ascii: ".")):
-                continue
-            default:
-                return false
+    /// 是否含 CJK 表意文字（汉字）
+    static func containsCJK(_ text: String) -> Bool {
+        text.unicodeScalars.contains { Self.isCJKScalar($0) }
+    }
+
+    private static func isCJKScalar(_ scalar: Unicode.Scalar) -> Bool {
+        switch scalar.value {
+        case 0x3400...0x4DBF, 0x4E00...0x9FFF, 0x20000...0x2A6DF,
+             0x2A700...0x2EBEF, 0x30000...0x3134F:
+            return true
+        default:
+            return false
+        }
+    }
+
+    /// 是否值得弹查词/翻译浮窗：非空、不过长、含拉丁字母或汉字。
+    /// 词典未命中但满足此条件的文本（短语/句子/中文）走系统翻译。
+    static func isTranslatable(_ text: String) -> Bool {
+        let trimmed = text.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !trimmed.isEmpty, trimmed.count <= 500 else { return false }
+        var hasLatin = false
+        var hasCJK = false
+        for scalar in trimmed.unicodeScalars {
+            if isCJKScalar(scalar) { hasCJK = true }
+            if (65...90).contains(scalar.value) || (97...122).contains(scalar.value) {
+                hasLatin = true
             }
         }
-        return hasLetter
+        return hasLatin || hasCJK
     }
 
     /// 查询前的清洗：弯引号转直引号、去首尾标点、去所有格 's

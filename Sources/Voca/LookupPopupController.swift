@@ -19,24 +19,35 @@
 import AppKit
 import SwiftUI
 
-/// 查词结果的处理结论（纯逻辑，可单测）
+/// 查词结果的处理结论（纯逻辑，可单测）：
+/// 词典命中 → 词条卡；未命中但可翻译（短语/句子/中文）→ 系统翻译；否则忽略
 enum LookupOutcome: Equatable {
-    case show(DictionaryLookupResult)
+    case card(DictionaryLookupResult)
+    case translate(text: String, direction: TranslationDirection)
     case ignored
 }
 
-/// 光标旁的词典浮窗：非激活面板，点外部任意处消失。
+/// 浮窗内容模型：词条卡 或 翻译视图
+enum LookupContent {
+    case card(DictionaryLookupResult)
+    case translation(original: String, direction: TranslationDirection)
+}
+
+/// 光标旁的查词/翻译浮窗：非激活面板，点外部任意处消失。
 ///
-/// 两个入口共用 `handleText`：
+/// 入口（共用 `handleText`）：
 /// - 全局快捷键（走 CaptureEngine 捕获管线，同保存流程）
 /// - 系统服务「用 Voca 查词」（右键 → 服务，由系统直接递来选中文本）
 ///
-/// 非单个英文单词或未命中词典时静默忽略；保存按钮走 ClipStore 合并保存。
+/// 展示策略：词典优先（单词/短语/术语/缩写，含词形变体解析），
+/// 未命中但含字母或汉字的文本走系统翻译（英↔中双向）；
+/// 「收入词库」走 ClipStore 合并保存，译文自动写入备注。
 @MainActor
 final class LookupPopupController: NSObject {
     static let shared = LookupPopupController()
 
     private var panel: NSPanel?
+    private var content: LookupContent?
     private var saveContext: (appName: String?, bundleID: String?, url: String?)?
 
     private override init() {
@@ -45,25 +56,35 @@ final class LookupPopupController: NSObject {
 
     // MARK: - 入口
 
-    /// 查词决策（纯逻辑）：非单词或未命中 → 忽略
-    nonisolated static func outcome(for raw: String, service: DictionaryService = .shared) -> LookupOutcome {
-        guard DictionaryService.isLookupableWord(raw),
-            let result = service.lookup(raw)
-        else { return .ignored }
-        return .show(result)
+    /// 查词/翻译决策（纯逻辑）：不可翻译 → 忽略；词典命中 → 卡片；否则 → 翻译
+    nonisolated static func outcome(
+        for raw: String, service: DictionaryService = .shared
+    ) -> LookupOutcome {
+        guard DictionaryService.isTranslatable(raw) else { return .ignored }
+        if let result = service.lookup(raw) {
+            return .card(result)
+        }
+        return .translate(
+            text: raw.trimmingCharacters(in: .whitespacesAndNewlines),
+            direction: TranslationDirection.forText(raw)
+        )
     }
 
-    /// 快捷键入口：文本来自 CaptureEngine（含来源与 URL 溯源）
+    /// 快捷键/服务入口：文本来自 CaptureEngine 或系统服务（含来源与 URL 溯源）
     func handleText(
         _ raw: String, appName: String?, bundleID: String?, url: String?
     ) {
+        let item: LookupContent
         switch Self.outcome(for: raw) {
-        case .show(let result):
-            saveContext = (appName, bundleID, url)
-            show(result: result)
+        case .card(let result):
+            item = .card(result)
+        case .translate(let text, let direction):
+            item = .translation(original: text, direction: direction)
         case .ignored:
-            break
+            return
         }
+        saveContext = (appName, bundleID, url)
+        show(content: item)
     }
 
     /// 系统服务入口：Info.plist NSServices → NSMessage "lookupWordService"。
@@ -91,11 +112,12 @@ final class LookupPopupController: NSObject {
 
     // MARK: - 面板
 
-    private func show(result: DictionaryLookupResult) {
+    private func show(content: LookupContent) {
+        self.content = content
         let hostView = NSHostingView(
             rootView: LookupPopupView(
-                result: result,
-                onSave: { [weak self] in self?.saveToLibrary() }
+                content: content,
+                onSave: { [weak self] note in self?.saveToLibrary(note: note) }
             )
         )
         let contentSize = hostView.fittingSize
@@ -198,19 +220,26 @@ final class LookupPopupController: NSObject {
 
     // MARK: - 保存
 
-    /// 浮窗「收入词库」：走与 ⌥⇧S 相同的合并保存（同文本计数 +1 置顶）
-    private func saveToLibrary() {
-        guard let panel, panel.isVisible else { return }
-        let word = (panel.contentView as? NSHostingView<LookupPopupView>)?
-            .rootView.result.entry.word ?? ""
-        guard !word.isEmpty else { return }
+    /// 浮窗「收入词库」：与 ⌥⇧S 相同的合并保存（同文本计数 +1 置顶）；
+    /// 翻译模式下译文由视图经 `note` 传入，自动写入备注栏
+    private func saveToLibrary(note: String?) {
+        guard let content else { return }
+        let text: String
+        switch content {
+        case .card(let result):
+            text = result.entry.word
+        case .translation(let original, _):
+            text = original
+        }
+        let trimmedNote = note?.trimmingCharacters(in: .whitespacesAndNewlines)
         let context = saveContext ?? (nil, nil, nil)
         do {
             _ = try AppModel.shared.store.save(
-                text: word,
+                text: text,
                 appName: context.appName,
                 bundleID: context.bundleID,
-                url: context.url
+                url: context.url,
+                note: (trimmedNote?.isEmpty ?? true) ? nil : trimmedNote
             )
         } catch {
             ToastController.shared.show("保存失败：\(error.localizedDescription)")
@@ -218,21 +247,45 @@ final class LookupPopupController: NSObject {
     }
 }
 
-/// 浮窗内容：词典卡 + 底部「收入词库」按钮
+/// 浮窗内容：词条卡或翻译视图 + 底部「收入词库」按钮
 private struct LookupPopupView: View {
-    let result: DictionaryLookupResult
-    let onSave: () -> Void
+    let content: LookupContent
+    let onSave: (String?) -> Void
     @State private var saved = false
+    @State private var translationResult: String?
 
     var body: some View {
         VStack(spacing: 8) {
-            DictionaryCardView(result: result, showsBackground: false)
+            switch content {
+            case .card(let result):
+                DictionaryCardView(result: result, showsBackground: false)
+            case .translation(let original, let direction):
+                VStack(alignment: .leading, spacing: 4) {
+                    Text("原文")
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                    Text(original)
+                        .font(.system(size: 14))
+                        .fixedSize(horizontal: false, vertical: true)
+                        .textSelection(.enabled)
+                }
+                .frame(maxWidth: .infinity, alignment: .leading)
+                Divider()
+                TranslatorView(text: original, direction: direction) { result in
+                    translationResult = result
+                }
+                // 朗读英文侧：英→中读原文，中→英读译文
+                speakRow(
+                    for: direction == .englishToChinese
+                        ? original : (translationResult ?? "")
+                )
+            }
             Divider()
             HStack {
                 Button {
                     guard !saved else { return }
                     saved = true
-                    onSave()
+                    onSave(translationResult)
                 } label: {
                     Label(
                         saved ? "已入库" : "收入词库",
@@ -256,5 +309,29 @@ private struct LookupPopupView: View {
             RoundedRectangle(cornerRadius: 12, style: .continuous)
                 .strokeBorder(.quaternary, lineWidth: 1)
         )
+    }
+
+    /// 英/美发音按钮（仅对非空英文文本显示）
+    private func speakRow(for englishText: String) -> some View {
+        Group {
+            if !englishText.isEmpty {
+                HStack(spacing: 10) {
+                    ForEach(SpeechAccent.allCases, id: \.rawValue) { accent in
+                        Button {
+                            SpeechService.shared.speak(englishText, accent: accent)
+                        } label: {
+                            Label(
+                                accent == .british ? "英" : "美",
+                                systemImage: "speaker.wave.2"
+                            )
+                            .font(.callout)
+                        }
+                        .buttonStyle(.borderless)
+                        .help(accent == .british ? "英音朗读" : "美音朗读")
+                    }
+                    Spacer()
+                }
+            }
+        }
     }
 }

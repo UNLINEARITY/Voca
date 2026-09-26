@@ -40,7 +40,8 @@ A completed build must contain zero errors and zero warnings.
 | `Sources/Voca/DictionaryService.swift` | Embedded read-only ECDICT lookup, word detection, display formatting |
 | `Sources/Voca/DictionaryCardView.swift` | Dictionary card in the edit sheet (phonetics, senses, tags, speak buttons) |
 | `Sources/Voca/SpeechService.swift` | Offline system TTS with per-accent best-voice selection |
-| `Sources/Voca/LookupPopupController.swift` | Cursor-side lookup popup panel, system service receiver, popup placement |
+| `Sources/Voca/TranslationService.swift` | Apple on-device translation wrapper (en↔zh) and translator view |
+| `Sources/Voca/LookupPopupController.swift` | Cursor-side lookup/translation popup, service receiver, placement |
 | `scripts/make_dictionary.py` | Generates the embedded dictionary.sqlite from the ECDICT CSV |
 | `build.sh` | Release bundle assembly, resources, signing, verification |
 

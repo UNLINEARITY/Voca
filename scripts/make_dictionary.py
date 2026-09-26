@@ -21,12 +21,15 @@
 数据源：https://github.com/skywind3000/ECDICT （MIT License）
 用法：python3 scripts/make_dictionary.py <ecdict.csv> [-o 输出路径]
 
-收录规则（目标：约 20MB 覆盖日常 + 考试 + 带注释的难词）：
+收录规则（目标：单词 + 短语 + 专业术语的离线词典）：
   1. 核心：当代语料库词频 frq 或 BNC 词频 bnc 排名前 15 万；
      或柯林斯星级 collins>=1；或牛津 3000 核心词 oxford=1
-  2. 注释长尾：无排名但自带音标、且为纯字母单词（长度<=25）
+  2. 注释长尾：无排名但自带音标、且为纯字母单词（长度<=25）；
+     或缩写——全大写 2-8 字母、或释义带 abbr. 标记（带中文释义）
   3. 词形家族：exchange 以 "0:<原形>" 指向已收录词的变体
      （went/gave 等本身无词频排名的词形）
+  4. 短语与专业术语：2 到 5 个单词、带中文释义的多词词条
+     （含 [计]/[医]/[化]/[经] 等领域术语，全量收录）
 
 生成表结构：
   dictionary(word 主键 COLLATE NOCASE, phonetic, translation, definition,
@@ -44,8 +47,11 @@ import sys
 
 # ECDICT 的 word 字段实际存在的字符范围（含连字符词、所有格如 'em）
 SINGLE_WORD = re.compile(r"^[A-Za-z][A-Za-z'\-]*$")
+ACRONYM = re.compile(r"^[A-Z]{2,8}$")
 MAX_WORD_LEN = 25
 FREQ_TOP = 150_000
+PHRASE_MIN_WORDS = 2
+PHRASE_MAX_WORDS = 5
 
 COLUMNS = ["word", "phonetic", "translation", "definition",
            "exchange", "tag", "collins", "oxford", "bnc", "frq"]
@@ -83,10 +89,19 @@ def select_entries(entries):
         collins = to_int(row.get("collins"))
         oxford = to_int(row.get("oxford"))
         phonetic = (row.get("phonetic") or "").strip()
+        translation = (row.get("translation") or "").strip()
+        definition = (row.get("definition") or "").strip()
         if (0 < frq <= FREQ_TOP or 0 < bnc <= FREQ_TOP
                 or collins >= 1 or oxford == 1):
             keep(word, row)
         elif (phonetic and SINGLE_WORD.match(word) and len(word) <= MAX_WORD_LEN):
+            keep(word, row)
+        elif (translation and (ACRONYM.match(word)
+                              or translation.lower().startswith("abbr")
+                              or definition.lower().startswith("abbr"))):
+            keep(word, row)
+        elif (PHRASE_MIN_WORDS <= len(word.split()) <= PHRASE_MAX_WORDS
+                and translation):
             keep(word, row)
 
     # 规则 3：词形家族（exchange "0:<原形>" 指向已收录词）
@@ -138,6 +153,7 @@ def build_db(selected, out_path):
                 ("source_license", "MIT"),
                 ("entries", str(len(selected))),
                 ("freq_top", str(FREQ_TOP)),
+                ("phrase_max_words", str(PHRASE_MAX_WORDS)),
                 ("generated", datetime.date.today().isoformat()),
             ])
         db.commit()
