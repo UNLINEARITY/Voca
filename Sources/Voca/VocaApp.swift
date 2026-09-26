@@ -25,6 +25,7 @@ extension KeyboardShortcuts.Name {
     static let saveSelection = Self("saveSelection")
     // 保留旧标识，避免重置用户已录制的工作区快捷键。
     static let openGalaxy = Self("openGalaxy")
+    static let lookupWord = Self("lookupWord")
 }
 
 @MainActor
@@ -96,6 +97,28 @@ final class AppModel: ObservableObject {
         }
     }
 
+    /// 查词快捷键：同保存的捕获管线，但命中单词弹词典浮窗，非单词静默
+    func handleLookupHotkey() {
+        DispatchQueue.global(qos: .userInitiated).async {
+            let result = CaptureEngine.shared.capture()
+            DispatchQueue.main.async {
+                switch result {
+                case .success(let text, let appName, let bundleID, let url):
+                    LookupPopupController.shared.handleText(
+                        text, appName: appName, bundleID: bundleID, url: url
+                    )
+                case .emptySelection:
+                    ToastController.shared.show("未检测到选中文本")
+                case .notTrusted:
+                    ToastController.shared.show("需要辅助功能权限，正在打开系统设置…")
+                    CaptureEngine.shared.requestTrust()
+                case .secureField:
+                    ToastController.shared.show("已跳过安全输入框（密码）")
+                }
+            }
+        }
+    }
+
     private func handle(_ result: CaptureResult) {
         switch result {
         case .success(let text, let appName, let bundleID, let url):
@@ -131,11 +154,16 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     func applicationDidFinishLaunching(_ notification: Notification) {
         _ = WorkspaceNavigation.shared
         AppModel.shared.startGestureMonitorIfNeeded()
+        // 系统服务「用 Voca 查词」（右键 → 服务）的接收器
+        NSApp.servicesProvider = LookupPopupController.shared
         KeyboardShortcuts.onKeyUp(for: .saveSelection) {
             AppModel.shared.handleHotkey()
         }
         KeyboardShortcuts.onKeyUp(for: .openGalaxy) {
             WorkspaceNavigation.shared.toggleLastWorkspace()
+        }
+        KeyboardShortcuts.onKeyUp(for: .lookupWord) {
+            AppModel.shared.handleLookupHotkey()
         }
         // 调试/自动化入口：`open Voca.app --args --galaxy` 启动即打开星图
         if CommandLine.arguments.contains("--galaxy") {
@@ -176,6 +204,12 @@ struct VocaApp: App {
             KeyboardShortcuts.setShortcut(
                 KeyboardShortcuts.Shortcut(.v, modifiers: [.option, .shift]),
                 for: .openGalaxy
+            )
+        }
+        if KeyboardShortcuts.getShortcut(for: .lookupWord) == nil {
+            KeyboardShortcuts.setShortcut(
+                KeyboardShortcuts.Shortcut(.d, modifiers: [.option, .shift]),
+                for: .lookupWord
             )
         }
     }
@@ -241,6 +275,7 @@ struct MenuBarView: View {
 
             KeyboardShortcuts.Recorder("保存快捷键：", name: .saveSelection)
             KeyboardShortcuts.Recorder("工作区快捷键：", name: .openGalaxy)
+            KeyboardShortcuts.Recorder("查词快捷键：", name: .lookupWord)
 
             Toggle(isOn: $model.threeFingerSaveEnabled) {
                 Label("三指下滑保存（实验性）", systemImage: "hand.draw")

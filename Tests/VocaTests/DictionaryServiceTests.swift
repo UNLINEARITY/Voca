@@ -158,3 +158,96 @@ final class DictionaryServiceTests: XCTestCase {
         )
     }
 }
+
+// MARK: - 查词入口决策与浮窗定位
+
+final class LookupPopupLogicTests: XCTestCase {
+    private var service: DictionaryService!
+    private var dbURL: URL!
+
+    override func setUpWithError() throws {
+        let dir = FileManager.default.temporaryDirectory
+            .appendingPathComponent("voca-lookup-tests-\(UUID().uuidString)", isDirectory: true)
+        try FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
+        dbURL = dir.appendingPathComponent("dictionary.sqlite")
+        let dbQueue = try DatabaseQueue(path: dbURL.path)
+        try dbQueue.write { db in
+            try db.execute(sql: """
+                CREATE TABLE dictionary (
+                    word TEXT PRIMARY KEY COLLATE NOCASE,
+                    phonetic TEXT NOT NULL DEFAULT '',
+                    translation TEXT NOT NULL DEFAULT '',
+                    definition TEXT NOT NULL DEFAULT '',
+                    exchange TEXT NOT NULL DEFAULT '',
+                    tag TEXT NOT NULL DEFAULT '',
+                    collins INTEGER NOT NULL DEFAULT 0,
+                    oxford INTEGER NOT NULL DEFAULT 0,
+                    bnc INTEGER NOT NULL DEFAULT 0,
+                    frq INTEGER NOT NULL DEFAULT 0
+                )
+                """)
+            try db.execute(
+                sql: "INSERT INTO dictionary (word, translation) VALUES ('go', 'vi. 去')"
+            )
+        }
+        service = DictionaryService(url: dbURL)
+    }
+
+    override func tearDownWithError() throws {
+        try FileManager.default.removeItem(at: dbURL.deletingLastPathComponent())
+    }
+
+    func testOutcomeIgnoresNonWordsAndMisses() {
+        // 非单词、空、句子、未命中词 → 全部静默忽略
+        XCTAssertEqual(LookupPopupController.outcome(for: "hello world", service: service), .ignored)
+        XCTAssertEqual(LookupPopupController.outcome(for: "", service: service), .ignored)
+        XCTAssertEqual(LookupPopupController.outcome(for: "美丽", service: service), .ignored)
+        XCTAssertEqual(LookupPopupController.outcome(for: "nonexistent", service: service), .ignored)
+    }
+
+    func testOutcomeShowsDictionaryHit() {
+        if case .show(let result) = LookupPopupController.outcome(for: "\"Go.\"", service: service) {
+            XCTAssertEqual(result.entry.word, "go")
+        } else {
+            XCTFail("应命中 go")
+        }
+    }
+
+    // MARK: 浮窗定位
+
+    private let visible = NSRect(x: 0, y: 0, width: 1000, height: 800)
+
+    func testPopupFrameSitsAboveCursor() {
+        let frame = LookupPopupController.popupFrame(
+            cursor: CGPoint(x: 500, y: 400),
+            size: CGSize(width: 400, height: 200),
+            visibleFrame: visible
+        )
+        XCTAssertEqual(frame.minY, 418, accuracy: 0.01)
+        XCTAssertEqual(frame.midX, 500, accuracy: 0.01)
+    }
+
+    func testPopupFrameFlipsBelowWhenNoRoomAbove() {
+        let frame = LookupPopupController.popupFrame(
+            cursor: CGPoint(x: 500, y: 750),
+            size: CGSize(width: 400, height: 200),
+            visibleFrame: visible
+        )
+        XCTAssertEqual(frame.maxY, 732, accuracy: 0.01)
+    }
+
+    func testPopupFrameClampsHorizontally() {
+        let nearLeft = LookupPopupController.popupFrame(
+            cursor: CGPoint(x: 30, y: 400),
+            size: CGSize(width: 400, height: 200),
+            visibleFrame: visible
+        )
+        XCTAssertEqual(nearLeft.minX, 6, accuracy: 0.01)
+        let nearRight = LookupPopupController.popupFrame(
+            cursor: CGPoint(x: 980, y: 400),
+            size: CGSize(width: 400, height: 200),
+            visibleFrame: visible
+        )
+        XCTAssertEqual(nearRight.maxX, 994, accuracy: 0.01)
+    }
+}

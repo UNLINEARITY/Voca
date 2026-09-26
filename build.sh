@@ -63,6 +63,28 @@ cat > "$APP/Contents/Info.plist" <<'EOF'
     <string>Voca 在保存来自浏览器的选中文字时，读取当前标签页网址作为来源记录。</string>
     <key>NSScreenCaptureUsageDescription</key>
     <string>Voca 仅在打开星图时读取当前屏幕，以实时呈现玻璃球的透镜折射；画面只在内存中处理，不会保存。</string>
+    <key>NSServices</key>
+    <array>
+        <dict>
+            <key>NSMenuItem</key>
+            <dict>
+                <key>default</key>
+                <string>用 Voca 查词</string>
+            </dict>
+            <key>NSMessage</key>
+            <string>lookupWordService</string>
+            <key>NSPortName</key>
+            <string>local.voca.Voca</string>
+            <key>NSSendTypes</key>
+            <array>
+                <string>NSStringPboardType</string>
+            </array>
+            <key>NSUserData</key>
+            <string>lookup</string>
+            <key>NSServiceDescription</key>
+            <string>在光标旁弹出 Voca 词典释义与英/美发音</string>
+        </dict>
+    </array>
     <key>NSHumanReadableCopyright</key>
     <string>Personal use</string>
 </dict>
@@ -80,6 +102,9 @@ else
     codesign --force --sign - "$APP"
 fi
 codesign --verify --verbose "$APP" 2>&1 | tail -1
+
+# 刷新系统服务登记，让右键「服务」菜单尽快出现「用 Voca 查词」
+/System/Library/CoreServices/pbs -update >/dev/null 2>&1 || true
 
 echo "✅ 构建完成：$APP"
 echo "   启动：open $APP"
