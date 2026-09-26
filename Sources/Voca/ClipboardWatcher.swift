@@ -263,6 +263,7 @@ final class ClipboardWatcher: ObservableObject {
 
 struct ClipboardHistoryView: View {
     @EnvironmentObject private var watcher: ClipboardWatcher
+    @AppStorage("listFontSize") private var listFontSize = 13.0
     @State private var promotedIDs: Set<UUID> = []
     @State private var expandedIDs: Set<UUID> = []
     @State private var deletingEntry: ClipboardEntry?
@@ -404,7 +405,7 @@ struct ClipboardHistoryView: View {
     private func content(_ entry: ClipboardEntry, expanded: Bool) -> some View {
         if let text = entry.text {
             Text(text)
-                .font(.system(size: 13))
+                .font(.system(size: listFontSize))
                 .lineLimit(expanded ? nil : 5)
                 .truncationMode(.tail)
                 .textSelection(.enabled)
@@ -413,7 +414,7 @@ struct ClipboardHistoryView: View {
                 files.count == 1 ? files[0] : "\(files.count) 个文件",
                 systemImage: "doc.on.doc.fill"
             )
-            .font(.system(size: 13))
+            .font(.system(size: listFontSize))
             .lineLimit(1)
             .foregroundStyle(.secondary)
         } else if let image = entry.image {

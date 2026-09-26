@@ -24,6 +24,7 @@ import SwiftUI
 struct DictionaryCardView: View {
     let result: DictionaryLookupResult
     var showsBackground = true
+    @AppStorage("popupFontSize") private var popupFontSize = 13.0
 
     private var entry: DictionaryEntry { result.entry }
 
@@ -48,10 +49,9 @@ struct DictionaryCardView: View {
         VStack(alignment: .leading, spacing: 6) {
             HStack(alignment: .firstTextBaseline) {
                 Text(entry.word)
-                    .font(.title3)
-                    .bold()
+                    .font(.system(size: popupFontSize + 3, weight: .bold))
                 Text(DictionaryService.prettifiedPhonetic(entry.phonetic))
-                    .font(.system(size: 13))
+                    .font(.system(size: popupFontSize))
                     .foregroundStyle(.secondary)
                 Spacer()
                 speakButtons
@@ -101,10 +101,9 @@ struct DictionaryCardView: View {
             Divider().padding(.vertical, 1)
             HStack(alignment: .firstTextBaseline, spacing: 4) {
                 Text(lemma.word)
-                    .font(.callout)
-                    .bold()
+                    .font(.system(size: popupFontSize + 1, weight: .bold))
                 Text(DictionaryService.prettifiedPhonetic(lemma.phonetic))
-                    .font(.caption)
+                    .font(.system(size: popupFontSize - 2))
                     .foregroundStyle(.secondary)
             }
             senseBlock(lemma)
@@ -127,7 +126,7 @@ struct DictionaryCardView: View {
     /// 释义文本：ECDICT 以字面 "\n" 分隔义项，展示时转为换行；可选中复制
     private func senseText(_ raw: String, secondary: Bool) -> some View {
         Text(DictionaryService.displayText(raw))
-            .font(.system(size: 13))
+            .font(.system(size: popupFontSize))
             .foregroundStyle(secondary ? .secondary : .primary)
             .fixedSize(horizontal: false, vertical: true)
             .frame(maxWidth: .infinity, alignment: .leading)

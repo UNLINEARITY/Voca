@@ -22,15 +22,24 @@ import QuartzCore
 import SwiftUI
 
 enum WorkspaceTab: String, CaseIterable, Identifiable {
+    case settings
     case library
     case clipboard
 
     var id: String { rawValue }
-    var galaxySource: GalaxySource { self == .library ? .library : .clipboard }
+    /// 标签对应的星图档：设置 ↔ 折射，词库 ↔ 词库，剪贴板 ↔ 剪贴板
+    var galaxySource: GalaxySource {
+        switch self {
+        case .settings: .refraction
+        case .library: .library
+        case .clipboard: .clipboard
+        }
+    }
 }
 
 private enum WorkspaceDestination: String {
     case galaxy
+    case settings
     case library
     case clipboard
 }
@@ -95,6 +104,7 @@ final class WorkspaceNavigation: ObservableObject {
         } else {
             switch lastDestination {
             case .galaxy: galaxy.open()
+            case .settings: openPanel(.settings)
             case .library: openPanel(.library)
             case .clipboard: openPanel(.clipboard)
             }
@@ -107,8 +117,14 @@ final class WorkspaceNavigation: ObservableObject {
     }
 
     func setTab(_ newTab: WorkspaceTab) {
-        lastDestination = newTab == .library ? .library : .clipboard
-        UserDefaults.standard.set(lastDestination.rawValue, forKey: Self.destinationKey)
+        let destination: WorkspaceDestination
+        switch newTab {
+        case .settings: destination = .settings
+        case .library: destination = .library
+        case .clipboard: destination = .clipboard
+        }
+        lastDestination = destination
+        UserDefaults.standard.set(destination.rawValue, forKey: Self.destinationKey)
         UserDefaults.standard.set(newTab.rawValue, forKey: Self.panelTabKey)
         guard newTab != tab else { return }
         tab = newTab
@@ -173,7 +189,11 @@ final class WorkspaceNavigation: ObservableObject {
                 return true
             }
             if event.keyCode == kVK_LeftArrow || event.keyCode == kVK_RightArrow {
-                setTab(event.keyCode == kVK_RightArrow ? .clipboard : .library)
+                // 设置 ↔ 词库 ↔ 剪贴板 循环切换
+                let order: [WorkspaceTab] = [.settings, .library, .clipboard]
+                guard let index = order.firstIndex(of: tab) else { return false }
+                let delta = event.keyCode == kVK_RightArrow ? 1 : order.count - 1
+                setTab(order[(index + delta) % order.count])
                 return true
             }
         }
@@ -186,7 +206,13 @@ final class WorkspaceNavigation: ObservableObject {
         let panel = ensurePanelWindow()
         let source = toGalaxy ? tab.galaxySource : galaxy.source
         if !toGalaxy {
-            setTab(targetTab ?? (source == .clipboard ? .clipboard : .library))
+            // 星图回面板：折射档回设置页，其余回对应列表
+            let backTab: WorkspaceTab = switch source {
+            case .clipboard: .clipboard
+            case .refraction: .settings
+            case .library: .library
+            }
+            setTab(targetTab ?? backTab)
         }
         let reduceMotion = NSWorkspace.shared.accessibilityDisplayShouldReduceMotion
         isTransitioning = true
@@ -311,12 +337,13 @@ private struct WorkspacePanelView: View {
                     get: { navigation.tab },
                     set: { navigation.setTab($0) }
                 )) {
+                    Label("设置", systemImage: "gearshape").tag(WorkspaceTab.settings)
                     Text("词库").tag(WorkspaceTab.library)
                     Text("剪贴板").tag(WorkspaceTab.clipboard)
                 }
                 .pickerStyle(.segmented)
                 .labelsHidden()
-                .frame(width: 220)
+                .frame(width: 300)
                 Spacer()
                 Text("⇧⌥←→ 切换 · ⇧⌥↓ 星图")
                     .font(.caption)
@@ -334,7 +361,9 @@ private struct WorkspacePanelView: View {
 
             Divider()
 
-            if navigation.tab == .library {
+            if navigation.tab == .settings {
+                SettingsView()
+            } else if navigation.tab == .library {
                 RecordsView()
             } else {
                 ClipboardHistoryView()

@@ -478,12 +478,13 @@ struct ClipRow: View {
     var onDelete: () -> Void
     @EnvironmentObject private var store: ClipStore
     @EnvironmentObject private var watcher: ClipboardWatcher
+    @AppStorage("listFontSize") private var listFontSize = 13.0
     @State private var expanded = false
 
     var body: some View {
         VStack(alignment: .leading, spacing: 6) {
             Text(clip.text)
-                .font(.system(size: 13))
+                .font(.system(size: listFontSize))
                 .lineLimit(expanded ? nil : 5)
                 .truncationMode(.tail)
                 .textSelection(.enabled)
@@ -491,7 +492,7 @@ struct ClipRow: View {
             // 备注浅灰显示，行数跟随备注本身（不截断）
             if let note = clip.note, !note.isEmpty {
                 Text(note)
-                    .font(.system(size: 12))
+                    .font(.system(size: listFontSize - 1))
                     .foregroundStyle(.secondary)
                     .textSelection(.enabled)
             }
@@ -585,6 +586,7 @@ struct EditClipSheet: View {
     let clip: Clip
     let onSave: (String, String?) -> Void
     @Environment(\.dismiss) private var dismiss
+    @AppStorage("listFontSize") private var listFontSize = 13.0
     @State private var text: String
     @State private var note: String
 
@@ -634,7 +636,7 @@ struct EditClipSheet: View {
     /// 多行编辑框：与其他编辑区均分空间，内容过多时内部滚动
     private func editor(text: Binding<String>) -> some View {
         TextEditor(text: text)
-            .font(.system(size: 13))
+            .font(.system(size: listFontSize))
             .frame(maxHeight: .infinity)
             .padding(4)
             .background(Color(nsColor: .textBackgroundColor))
@@ -651,6 +653,7 @@ struct ClipTimelineSheet: View {
     let clip: Clip
     @EnvironmentObject private var store: ClipStore
     @Environment(\.dismiss) private var dismiss
+    @AppStorage("listFontSize") private var listFontSize = 13.0
     @State private var events: [ClipEvent] = []
 
     var body: some View {
@@ -689,7 +692,7 @@ struct ClipTimelineSheet: View {
                         Image(systemName: "app.dashed")
                             .foregroundStyle(.quaternary)
                     }
-                    .font(.system(size: 13))
+                    .font(.system(size: listFontSize))
                 }
                 .listStyle(.inset)
             }

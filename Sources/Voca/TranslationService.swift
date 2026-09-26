@@ -50,6 +50,7 @@ struct TranslatorView: View {
     /// 译文就绪时回调（浮窗保存按钮把译文写进备注）
     var onResult: ((String) -> Void)? = nil
 
+    @AppStorage("popupFontSize") private var popupFontSize = 13.0
     @State private var config: TranslationSession.Configuration?
     @State private var result: String?
     @State private var failed = false
@@ -62,7 +63,7 @@ struct TranslatorView: View {
                         .font(.caption)
                         .foregroundStyle(.secondary)
                     Text(result)
-                        .font(.system(size: 14))
+                        .font(.system(size: popupFontSize + 1))
                         .fixedSize(horizontal: false, vertical: true)
                         .textSelection(.enabled)
                 }

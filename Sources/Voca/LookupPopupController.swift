@@ -268,6 +268,7 @@ private struct LookupPopupView: View {
     let content: LookupContent
     var allowSave = true
     let onSave: (String?) -> Void
+    @AppStorage("popupFontSize") private var popupFontSize = 13.0
     @State private var saved = false
     @State private var translationResult: String?
 
@@ -282,7 +283,7 @@ private struct LookupPopupView: View {
                         .font(.caption)
                         .foregroundStyle(.secondary)
                     Text(original)
-                        .font(.system(size: 14))
+                        .font(.system(size: popupFontSize + 1))
                         .fixedSize(horizontal: false, vertical: true)
                         .textSelection(.enabled)
                 }
