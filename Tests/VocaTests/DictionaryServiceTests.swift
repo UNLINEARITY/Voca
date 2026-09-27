@@ -115,6 +115,75 @@ final class DictionaryServiceTests: XCTestCase {
         XCTAssertNil(empty.lookup("go"))
     }
 
+    // MARK: - 术语覆盖层
+
+    /// 术语库命中时与 ECDICT 释义并存展示；词典未命中但术语库命中时直接出卡
+    func testTermSupplementLayer() throws {
+        let dir = FileManager.default.temporaryDirectory
+            .appendingPathComponent("voca-terms-tests-\(UUID().uuidString)", isDirectory: true)
+        try FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: dir) }
+
+        let dictURL = dir.appendingPathComponent("dictionary.sqlite")
+        let dict = try DatabaseQueue(path: dictURL.path)
+        try dict.write { db in
+            try db.execute(sql: """
+                CREATE TABLE dictionary (
+                    word TEXT PRIMARY KEY COLLATE NOCASE,
+                    phonetic TEXT NOT NULL DEFAULT '',
+                    translation TEXT NOT NULL DEFAULT '',
+                    definition TEXT NOT NULL DEFAULT '',
+                    exchange TEXT NOT NULL DEFAULT '',
+                    tag TEXT NOT NULL DEFAULT '',
+                    collins INTEGER NOT NULL DEFAULT 0,
+                    oxford INTEGER NOT NULL DEFAULT 0,
+                    bnc INTEGER NOT NULL DEFAULT 0,
+                    frq INTEGER NOT NULL DEFAULT 0
+                )
+                """)
+            try db.execute(
+                sql: "INSERT INTO dictionary (word, phonetic, translation) VALUES ('grounding', 'graundɪŋ', '[网络] 接地')"
+            )
+        }
+
+        let termsURL = dir.appendingPathComponent("terms.sqlite")
+        let terms = try DatabaseQueue(path: termsURL.path)
+        try terms.write { db in
+            try db.execute(sql: """
+                CREATE TABLE terms (
+                    word TEXT PRIMARY KEY COLLATE NOCASE,
+                    translation TEXT NOT NULL,
+                    definition TEXT NOT NULL DEFAULT '',
+                    tag TEXT NOT NULL DEFAULT ''
+                )
+                """)
+            try db.execute(
+                sql: "INSERT INTO terms VALUES ('grounding', '奠基；锚定（将语言/符号与真实感知对接）', 'linking language to perception', 'AI')"
+            )
+            try db.execute(
+                sql: "INSERT INTO terms VALUES ('sim2real', '仿真到现实（迁移）', '', 'AI')"
+            )
+        }
+
+        let service = DictionaryService(url: dictURL, termsURL: termsURL)
+
+        // 并存：原释义保留，术语作为独立补充返回
+        let supplemented = service.lookup("grounding")
+        XCTAssertEqual(supplemented?.entry.translation, "[网络] 接地")
+        XCTAssertEqual(supplemented?.term?.translation, "奠基；锚定（将语言/符号与真实感知对接）")
+        XCTAssertEqual(supplemented?.term?.definition, "linking language to perception")
+        XCTAssertEqual(supplemented?.term?.tag, "AI")
+
+        // 补缺：词典未命中但术语库命中，直接出词条（无 term 附块，释义即术语）
+        let direct = service.lookup("sim2real")
+        XCTAssertEqual(direct?.entry.word, "sim2real")
+        XCTAssertEqual(direct?.entry.translation, "仿真到现实（迁移）")
+        XCTAssertNil(direct?.term)
+
+        // 术语库不覆盖未列出的词
+        XCTAssertNil(service.lookup("nonexistentword"))
+    }
+
     // MARK: - 单词判定
 
     func testIsTranslatable() {

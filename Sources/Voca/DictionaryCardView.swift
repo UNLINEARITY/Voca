@@ -87,9 +87,10 @@ struct DictionaryCardView: View {
     // MARK: - 释义
 
     /// 词形变体（went）：先说明自身（"go的过去式"），再附原形词条；
-    /// 原形词：直接展示中文/英文释义
+    /// 释义：术语库补充区块置顶（与原释义并存，不覆盖）
     @ViewBuilder
     private var senses: some View {
+        termSection
         if let lemma = result.lemma,
             lemma.word.lowercased() != entry.word.lowercased() {
             if !entry.translation.isEmpty {
@@ -109,6 +110,21 @@ struct DictionaryCardView: View {
         }
         enrichmentSections
         tagsRow
+    }
+
+    /// 术语库区块：中文释义＋可选英文说明（scripts/terms.csv 社区共建）
+    @ViewBuilder
+    private var termSection: some View {
+        if let term = result.term {
+            VStack(alignment: .leading, spacing: 3) {
+                sectionLabel("术语")
+                senseText(term.translation, secondary: false)
+                if !term.definition.isEmpty {
+                    senseText(term.definition, secondary: true)
+                }
+            }
+            Divider().padding(.vertical, 1)
+        }
     }
 
     // MARK: - 学习增强区块（词根/词形家族/相关短语/同义词）

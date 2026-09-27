@@ -63,6 +63,8 @@ struct DictionaryEntry: Equatable, Codable, FetchableRecord {
 struct DictionaryLookupResult: Equatable {
     let entry: DictionaryEntry
     let lemma: DictionaryEntry?
+    /// 术语库补充（scripts/terms.csv）：与原释义并存展示，不覆盖
+    var term: DictionaryEntry?
     var enrichment: DictionaryEnrichment?
 }
 
@@ -122,26 +124,36 @@ final class DictionaryService: @unchecked Sendable {
     static let shared = DictionaryService(userOverride: "dictionary-full.sqlite")
         ?? DictionaryService(bundleResource: "dictionary", extension: "sqlite")
 
-    /// 用户目录覆盖：~/Library/Application Support/Voca/<name> 存在时启用，否则 nil
+    /// 用户目录覆盖：~/Library/Application Support/Voca/<name> 存在时启用，否则 nil；
+    /// 无论用哪套词典，术语覆盖库始终从 bundle 加载
     private convenience init?(userOverride name: String) {
         let url = URL(fileURLWithPath: NSHomeDirectory())
             .appendingPathComponent("Library/Application Support/Voca", isDirectory: true)
             .appendingPathComponent(name)
         guard FileManager.default.fileExists(atPath: url.path) else { return nil }
         Self.logger.info("使用用户目录词典：\(url.path, privacy: .public)")
-        self.init(url: url)
+        let termsURL = Bundle.module.url(forResource: "terms", withExtension: "sqlite")
+        self.init(url: url, termsURL: termsURL)
     }
 
     private let dbQueue: DatabaseQueue?
+    /// 术语覆盖库（scripts/make_terms.py 生成）：查词时最高优先级修正释义
+    private let termsQueue: DatabaseQueue?
 
-    init(url: URL?) {
+    init(url: URL?, termsURL: URL? = nil) {
         guard let url else {
             dbQueue = nil
+            termsQueue = nil
             return
         }
         var config = Configuration()
         config.readonly = true
         dbQueue = try? DatabaseQueue(path: url.path, configuration: config)
+        termsQueue = termsURL.flatMap {
+            FileManager.default.fileExists(atPath: $0.path)
+                ? try? DatabaseQueue(path: $0.path, configuration: config)
+                : nil
+        }
     }
 
     convenience init(bundleResource name: String, extension ext: String) {
@@ -149,7 +161,8 @@ final class DictionaryService: @unchecked Sendable {
             self.init(url: nil)
             return
         }
-        self.init(url: url)
+        let termsURL = Bundle.module.url(forResource: "terms", withExtension: "sqlite")
+        self.init(url: url, termsURL: termsURL)
     }
 
     /// 查词；未命中或词典不可用时返回 nil
@@ -157,16 +170,45 @@ final class DictionaryService: @unchecked Sendable {
         guard let dbQueue else { return nil }
         let word = Self.normalizedWord(raw)
         guard !word.isEmpty else { return nil }
-        guard let entry = fetch(word, in: dbQueue) else { return nil }
+        guard let entry = fetch(word, in: dbQueue) else {
+            // 词典未命中但术语库命中：直接作为词条返回（如 sim2real/VLA）
+            if let term = fetchTerm(word) {
+                return DictionaryLookupResult(
+                    entry: term, lemma: nil, term: nil, enrichment: nil
+                )
+            }
+            return nil
+        }
         var lemma: DictionaryEntry?
         if let lemmaWord = entry.exchangeCode(prefixed: "0:"),
             lemmaWord.caseInsensitiveCompare(entry.word) != .orderedSame {
             lemma = fetch(lemmaWord, in: dbQueue)
         }
+        // 术语补充：优先查原词，其次查词形原形；与原释义并存
+        let term = fetchTerm(word) ?? lemma.flatMap { fetchTerm($0.word) }
         return DictionaryLookupResult(
             entry: entry,
             lemma: lemma,
+            term: term,
             enrichment: enrich(entry: entry, lemma: lemma, in: dbQueue)
+        )
+    }
+
+    /// 术语库查询（scripts/make_terms.py 生成的 terms 表）
+    private func fetchTerm(_ word: String) -> DictionaryEntry? {
+        guard let termsQueue else { return nil }
+        let row = try? termsQueue.read { db in
+            try Row.fetchOne(
+                db,
+                sql: "SELECT word, translation, definition, tag FROM terms WHERE word = ? COLLATE NOCASE",
+                arguments: [word]
+            )
+        }
+        guard let row else { return nil }
+        return DictionaryEntry(
+            word: row["word"], phonetic: "", translation: row["translation"],
+            definition: row["definition"], exchange: "", tag: row["tag"],
+            collins: 0, oxford: 0, bnc: 0, frq: 0
         )
     }
 

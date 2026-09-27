@@ -1,0 +1,374 @@
+word,translation,definition,tag
+grounding,"奠基；锚定（将语言/符号与真实感知对接）","linking language or symbols to real-world perception; e.g. visual grounding, symbol grounding",AI
+visual grounding,"视觉定位；指代定位","localizing the object in an image referred to by a text phrase",AI
+symbol grounding,"符号奠基","the problem of connecting symbols to their real-world meanings",AI
+grounded,"有据的；落地的；与现实对接的","based on or connected to real-world evidence or perception",AI
+affordance,"可供性（物体暗示的可能动作）","the action possibilities an object offers to an agent",AI
+embodiment,"具身性；具身化","the state of having a physical body through which an agent perceives and acts",AI
+embodied intelligence,"具身智能","intelligence that emerges from a body interacting with the physical world",AI
+embodied agent,"具身智能体","an agent that acts through a physical (or simulated) body",AI
+world model,"世界模型","an internal predictive model of environment dynamics",AI
+sim2real,"仿真到现实（迁移）","transferring policies trained in simulation to the real world",AI
+sim-to-real,"仿真到现实（迁移）","transfer from simulation to reality",AI
+zero-shot,"零样本（无需示例直接执行任务）","performing a task without task-specific examples",AI
+few-shot,"少样本（仅凭少量示例）","learning or performing from a handful of examples",AI
+one-shot,"单样本（仅一个示例）","learning from a single example",AI
+in-context learning,"上下文学习；情境学习","learning from examples provided in the prompt without weight updates",AI
+chain-of-thought,"思维链","step-by-step reasoning traces emitted before the final answer",AI
+scratchpad,"草稿区（模型的中间推理空间）","auxiliary space where a model writes intermediate reasoning steps",AI
+scratch,"草稿；从零开始（from scratch）；（表面）划痕","draft work; from the beginning; a surface mark",AI
+hallucination,"幻觉（模型编造不实内容）","confident outputs not grounded in facts or inputs",AI
+alignment,"对齐（使模型符合人类意图与价值观）","steering model behavior toward human intent and values",AI
+RLHF,"基于人类反馈的强化学习","reinforcement learning from human feedback",AI
+instruction tuning,"指令微调","fine-tuning on instruction-response pairs",AI
+fine-tuning,"微调","adaptation of a pretrained model to a specific task or domain",AI
+pretraining,"预训练","initial training on large corpora before task adaptation",AI
+supervised learning,"监督学习","learning from labeled examples",AI
+self-supervised learning,"自监督学习","learning supervisory signals from the data itself",AI
+unsupervised learning,无监督学习,"learning from unlabeled data",AI
+reinforcement learning,"强化学习","learning by interacting and receiving rewards",AI
+imitation learning,"模仿学习","learning behaviors by imitating demonstrations",AI
+behavior cloning,"行为克隆","supervised regression of expert actions onto observations",AI
+offline reinforcement learning,"离线强化学习","RL from a fixed dataset without environment interaction",AI
+offline RL,"离线强化学习","reinforcement learning from pre-collected data",AI
+online RL,"在线强化学习","RL with live environment interaction",AI
+policy,"策略（从状态到动作的映射）","the mapping from observations to actions",AI
+value function,"价值函数","estimate of expected return from a state or action",AI
+actor-critic,"演员-评论家（架构）","architecture pairing a policy with a value critic",AI
+reward shaping,"奖励塑形","crafting dense rewards to guide learning",AI
+reward hacking,"奖励作弊（钻奖励函数空子）","exploiting flaws in the reward function",AI
+sparse reward,"稀疏奖励","reward signal given only rarely, e.g. on task success",AI
+dense reward,"稠密奖励","frequent reward signal during a task",AI
+exploration,"探索（尝试新行为）","trying actions to gather information",AI
+exploitation,"利用（使用已知最优行为）","using known high-reward behavior",AI
+curiosity,"好奇心（内在驱动探索）","intrinsic motivation for novel states",AI
+hindsight,"后见之明（将失败重标注为成功）","relabelling achieved goals after the fact",AI
+goal-conditioned,"目标条件的","policy or model conditioned on a specified goal",AI
+demonstration,"示教；演示数据","example trajectories provided for imitation",AI
+teleoperation,"遥操作","remote human control of a robot",AI
+teleoperate,"遥操作","control a robot remotely",AI
+manipulation,"（机械臂）操作","using robotic arms to change the state of objects",AI
+grasping,"抓取","securely seizing objects with a gripper",AI
+prehensile,"可抓握的","capable of grasping",AI
+dexterous,"灵巧的（如灵巧手）","skillful in fine motor control",AI
+dexterous hand,"灵巧手","multi-fingered robotic hand",AI
+gripper,"夹爪；末端夹持器","the end-of-arm grasping device",AI
+end-effector,"末端执行器","the tool or hand mounted at the arm's end",AI
+end effector,"末端执行器","device at the end of a robotic arm",AI
+kinematics,"运动学（不考虑力的运动几何）","geometry of motion without forces",AI
+inverse kinematics,"逆运动学","computing joint angles for a desired pose",AI
+forward kinematics,"正运动学","computing pose from joint angles",AI
+dynamics,"动力学（力与运动的关系）","relation between forces and motion",AI
+torque,"力矩","rotational force",AI
+impedance control,"阻抗控制","control of force-position relation for compliant contact",AI
+compliance,"柔顺性（受外力时让步的程度）","yielding behavior under external force",AI
+whole-body control,"全身控制","coordinated control of all degrees of freedom",AI
+model predictive control,"模型预测控制","receding-horizon optimal control",AI
+MPC,"模型预测控制","model predictive control",AI
+PID,"比例-积分-微分（控制）","proportional-integral-derivative control",AI
+state estimation,"状态估计","inferring the true state from noisy sensors",AI
+Kalman filter,"卡尔曼滤波","recursive optimal estimator for linear systems",AI
+particle filter,粒子滤波,"sequential Monte Carlo estimation",AI
+odometry,"里程计（自身位移估计）","estimating own motion from internal sensors",AI
+visual odometry,"视觉里程计","odometry from camera images",AI
+SLAM,"即时定位与地图构建","simultaneous localization and mapping",AI
+loop closure,"回环检测","recognizing a previously visited place",AI
+relocalization,"重定位","recovering pose after tracking loss",AI
+mapping,"建图","building a map of the environment",AI
+point cloud,"点云","set of 3D points from depth sensors",AI
+voxel,"体素","volumetric pixel",AI
+occupancy grid,"占据栅格","grid map of free/occupied cells",AI
+semantic segmentation,"语义分割","per-pixel classification",AI
+instance segmentation,"实例分割","per-pixel masks per object instance",AI
+panoptic segmentation,"全景分割","unified semantic and instance segmentation",AI
+depth estimation,"深度估计","predicting per-pixel distance",AI
+stereo matching,"双目立体匹配","depth from image pairs",AI
+optical flow,"光流","per-pixel motion between frames",AI
+novel view synthesis,"新视角合成","rendering unseen viewpoints from captured images",AI
+NeRF,"神经辐射场","neural radiance fields for view synthesis",AI
+Gaussian splatting,"高斯泼溅（3D 场景表示）","scene representation with 3D Gaussians",AI
+feature matching,"特征匹配","corresponding keypoints across images",AI
+homography,"单应性（矩阵）","projective transform between planes",AI
+epipolar geometry,"对极几何","geometry of two-view correspondences",AI
+bundle adjustment,"光束法平差","joint refinement of structure and motion",AI
+calibration,"标定","estimating sensor parameters",AI
+extrinsic,"外参","sensor-to-world transform parameters",AI
+intrinsic,"内参","internal camera parameters",AI
+reprojection,"重投影","projecting estimated 3D back to images",AI
+photometric,"光度的（一致性/损失）","relating to pixel intensity",AI
+differentiable,"可微的","allowing gradient computation",AI
+end-to-end,"端到端（从原始输入直接到输出）","trained as one model from raw input to output",AI
+domain randomization,"域随机化","randomizing simulation to gain real-world robustness",AI
+domain adaptation,"域适应","adapting across data distributions",AI
+domain gap,"域差距","distribution mismatch between domains",AI
+transfer learning,"迁移学习","reusing knowledge across tasks",AI
+meta-learning,"元学习（学习如何学习）","learning to learn",AI
+generalization,"泛化（能力）","performing well on unseen data",AI
+overfitting,"过拟合","memorizing training data at the expense of generalization",AI
+underfitting,"欠拟合","model too simple to capture the data",AI
+ablation,"消融（实验）","removing components to measure their contribution",AI
+baseline,"基线（对照方法）","reference method for comparison",AI
+oracle,"先知（理论上限对照）","an upper-bound reference with privileged information",AI
+benchmark,"基准（测试集/方法）","standardized evaluation set or procedure",AI
+scaling law,"缩放定律","predictive relation of performance to scale",AI
+emergent capability,"涌现能力","abilities appearing abruptly beyond some scale",AI
+mixture-of-experts,"混合专家（架构）","routing inputs among specialized subnetworks",AI
+distillation,"蒸馏（知识蒸馏）","training a small model from a larger one",AI
+quantization,"量化","reducing numeric precision of weights",AI
+pruning,"剪枝","removing weights or structures",AI
+LoRA,"低秩适配（微调）","low-rank adaptation for parameter-efficient tuning",AI
+PEFT,"参数高效微调","parameter-efficient fine-tuning",AI
+adapter,"适配器（插入式微调模块）","small inserted trainable modules",AI
+checkpoint,"检查点（保存的模型权重）","saved model state",AI
+early stopping,"早停","halting training when validation worsens",AI
+learning rate,"学习率","step size of gradient updates",AI
+warmup,"预热（学习率渐升阶段）","gradual learning-rate ramp-up",AI
+weight decay,"权重衰减","L2 penalty on weights",AI
+batch,"批次（一次前向的样本数）","samples processed per step",AI
+gradient accumulation,"梯度累积","accumulating gradients to simulate larger batches",AI
+mixed precision,"混合精度训练","training with lower-precision numerics",AI
+data parallel,"数据并行","replicating the model across data shards",AI
+model parallel,"模型并行","splitting the model across devices",AI
+pipeline parallel,"流水线并行","staging layers across devices",AI
+VRAM,"显存","GPU memory",AI
+tensor,"张量","multi-dimensional array",AI
+broadcasting,"广播（张量维度扩展规则）","implicit dimension expansion in tensor ops",AI
+operator,"算子（计算图节点）","a computation node in a graph",AI
+kernel,"内核；算子（依上下文）","low-level routine or OS core",AI
+compilation,"编译（图优化/代码生成）","translating computation for execution",AI
+runtime,"运行时","the execution environment",AI
+latency,"延迟","response time",AI
+throughput,"吞吐量","work per unit time",AI
+real-time,"实时（严格时限内响应）","meeting strict timing deadlines",AI
+on-device,"端侧（设备本地运行）","running locally on the device",AI
+edge device,"边缘设备","compute device near the sensor",AI
+agent,"智能体","autonomous entity perceiving and acting",AI
+multi-agent,"多智能体","systems of interacting agents",AI
+tool use,"工具使用（智能体调用工具）","an agent invoking external tools",AI
+tool calling,"工具调用","invoking external functions from a model",AI
+reflection,"反思（智能体自我修正）","self-critique and revision loop",AI
+memory,"记忆（模块/机制）","persistent state across steps",AI
+retrieval,"检索（从外部知识取回）","fetching relevant external knowledge",AI
+RAG,"检索增强生成","retrieval-augmented generation",AI
+tokenizer,"分词器","text-to-token converter",AI
+token,"词元","model's basic text unit",AI
+context window,"上下文窗口","maximum tokens a model can attend to",AI
+prompt,"提示（词）","input text conditioning the model",AI
+prompt engineering,"提示工程","designing prompts for better outputs",AI
+system prompt,"系统提示（设定角色的指令）","high-level instruction framing the model",AI
+decoding,"解码（生成过程）","autoregressive output generation",AI
+beam search,"束搜索","keeping multiple hypotheses during decoding",AI
+temperature,"温度（采样随机度）","randomness of sampling",AI
+top-k,"前 k 采样","sampling from the k most likely tokens",AI
+top-p,"核采样（累计概率截断）","nucleus sampling",AI
+embedding,"嵌入；向量表示","dense vector representation",AI
+latent,"潜（变量/空间）","hidden representation",AI
+backbone,"主干网络","feature-extracting base network",AI
+head,"（任务）头","task-specific output layers",AI
+neck,"颈部（特征转换层）","intermediate feature-transform layers",AI
+attention,"注意力（机制）","weighted focus over inputs",AI
+self-attention,"自注意力","attention within a single sequence",AI
+cross-attention,"交叉注意力","attention across two sequences",AI
+positional encoding,"位置编码","injecting order information",AI
+residual connection,"残差连接","skip connection adding input to output",AI
+normalization,"归一化","stabilizing activation statistics",AI
+dropout,"随机失活","randomly zeroing units during training",AI
+epoch,"轮次（完整过一遍训练集）","one full pass over training data",AI
+iteration,"迭代（一次参数更新）","one optimization step",AI
+convergence,"收敛","approaching a stable solution",AI
+vanishing gradient,"梯度消失","gradients shrinking through depth",AI
+exploding gradient,"梯度爆炸","gradients growing unboundedly",AI
+objective,"目标函数","the function being optimized",AI
+surrogate loss,"代理损失","differentiable stand-in for the true objective",AI
+regularization,"正则化","penalties improving generalization",AI
+augmentation,"数据增强","synthetic variation of training data",AI
+annotation,"标注","human-provided labels",AI
+label,"标签；类别标注","target answer for an example",AI
+noisy label,"噪声标签","incorrect or ambiguous labels",AI
+class imbalance,"类别不平衡","unequal label distribution",AI
+out-of-distribution,"分布外（样本）","inputs outside the training distribution",AI
+OOD,"分布外（样本）","out-of-distribution",AI
+long-tail,"长尾（分布）","rare classes or events",AI
+trajectory,"轨迹","time-ordered sequence of states and actions",AI
+waypoint,"路径点","intermediate goal along a path",AI
+path planning,"路径规划","computing a collision-free path",AI
+motion planning,"运动规划","computing feasible motions",AI
+task planning,"任务规划","decomposing goals into subtasks",AI
+hierarchical,"分层的","organized in levels",AI
+skill,"技能（可复用子策略）","reusable sub-policy",AI
+primitive,"基元（原子动作/技能）","atomic action or skill",AI
+locomotion,"运动（机器人移动方式）","robot mobility, e.g. walking",AI
+quadruped,"四足（机器人）","four-legged robot",AI
+bipedal,"双足的","two-legged",AI
+humanoid,"人形（仿人）机器人","human-like robot",AI
+actuator,"执行器（致动器）","motion-generating device",AI
+servo,"伺服（电机）","closed-loop motor",AI
+encoder,"编码器（测角位移的传感器）","shaft position sensor; or data-to-code converter",AI
+IMU,"惯性测量单元","inertial measurement unit",AI
+LiDAR,"激光雷达","light detection and ranging",AI
+RGB-D,"深度相机（彩色＋深度）","color plus depth camera",AI
+fisheye,"鱼眼（镜头）","ultra wide-angle lens",AI
+time-of-flight,"飞行时间（测距）","depth from light travel time",AI
+structured light,"结构光（深度感知）","projected-pattern depth sensing",AI
+force sensor,"力传感器","measures contact forces",AI
+tactile,"触觉的","relating to touch sensing",AI
+haptics,"触觉反馈技术","touch-based feedback",AI
+proprioception,"本体感觉","sensing one's own body state",AI
+exteroception,"外感受（对外界感知）","sensing the external world",AI
+multimodal,"多模态","combining multiple sensing or data modalities",AI
+vision-language model,"视觉-语言模型","model jointly understanding images and text",AI
+VLM,"视觉-语言模型","vision-language model",AI
+vision-language-action,"视觉-语言-动作（模型）","model mapping perception and language to actions",AI
+VLA,"视觉-语言-动作模型","vision-language-action model",AI
+language grounding,"语言奠基（语言与感知对接）","connecting language to perception",AI
+instruction following,"指令遵循","executing natural-language instructions",AI
+language conditioning,"语言条件化","conditioning policies on language",AI
+success rate,"成功率","fraction of successful trials",AI
+rollout,"rollout（一次完整交互过程）","one execution episode of a policy",AI
+episode,"回合（一次完整交互）","one complete interaction sequence",AI
+horizon,"时域（交互长度）","length of an episode or plan",AI
+discount factor,"折扣因子","weighting of future rewards",AI
+return,"回报（累积奖励）","cumulative reward",AI
+curriculum,"课程（由易到难安排）","staged easy-to-hard schedule",AI
+simulator,"仿真器","environment emulator",AI
+simulation,"仿真","running in a simulated environment",AI
+digital twin,"数字孪生","virtual replica of a physical system",AI
+morphology,"形态学（身体结构）","the body's physical structure",AI
+degrees of freedom,"自由度","independent motion dimensions",AI
+DoF,"自由度","degrees of freedom",AI
+rigid body,"刚体","non-deforming object",AI
+articulated,"铰接的（多连杆结构）","joint-linked structure",AI
+collision avoidance,"避障","avoiding obstacles",AI
+obstacle,"障碍物","physical obstruction",AI
+clutter,"杂乱场景（物体散乱堆放）","disordered piles of objects",AI
+deformable,"可变形（物体）","non-rigid objects",AI
+articulated object,"铰接物体","objects with movable parts",AI
+semantic,"语义的","relating to meaning",AI
+instance,"实例（目标检测中的个体）","individual object occurrence",AI
+detection,"检测（目标检测）","locating and classifying objects",AI
+tracking,"跟踪","following objects over time",AI
+re-identification,"重识别","matching identities across views",AI
+open-vocabulary,"开放词表（可识别任意类别）","recognizing arbitrary classes from descriptions",AI
+promptable,"可提示的（如可提示分割）","steerable via prompts",AI
+reconstruction,"重建（三维）","recovering 3D structure",AI
+mesh,"网格（三维）","polygon surface representation",AI
+implicit representation,"隐式表示","function-defined surfaces or fields",AI
+occupancy network,"占据网络","network predicting occupancy",AI
+signed distance function,"符号距离函数","implicit surface as signed distance",AI
+SDF,"符号距离函数","signed distance function",AI
+action chunking,"动作分块（一次预测多步动作）","predicting action segments at once",AI
+diffusion policy,"扩散策略","policy represented as a denoising diffusion process",AI
+flow matching,"流匹配","simulation-free generative training objective",AI
+denoising,"去噪","removing noise; core of diffusion models",AI
+noise schedule,"噪声调度","noise level schedule in diffusion",AI
+classifier-free guidance,"无分类器引导","guidance without a separate classifier",AI
+data augmentation,"数据增强","synthetic training variation",AI
+synthetic data,"合成数据","artificially generated data",AI
+crawl,"爬取；抓取（数据/网页）","fetching web data; also gait term",AI
+dataset,"数据集","collection of examples",AI
+prevalence,"普遍程度","how common something is",AI
+qualitative,"定性的","non-numerical evaluation",AI
+quantitative,"定量的","numerical evaluation",AI
+user study,"用户研究","evaluation with human participants",AI
+failure case,"失败案例","examples of method failure",AI
+error mode,"失效模式","characteristic way of failing",AI
+robustness,"鲁棒性","resistance to perturbation",AI
+interpretability,"可解释性","how understandable a model is",AI
+explainability,"可解释性","explanations of model behavior",AI
+capability,"能力","what a system can do",AI
+agentic,"智能体式的（自主行动）","acting autonomously over long horizons",AI
+orchestration,"编排（多组件调度）","coordinating components",AI
+middleware,"中间件","software layer between components",AI
+idempotent,"幂等的（重复执行结果不变）","repeatable without changing the result",AI
+eventual consistency,"最终一致性","consistency reached after propagation",AI
+race condition,"竞态条件","timing-dependent interleaving bugs",AI
+deadlock,"死锁","mutual blocking",AI
+throughput,"吞吐量","work completed per unit time",AI
+pipeline,"流水线；管线","staged processing chain",AI
+canary,"金丝雀发布（小流量验证）","small-scope rollout for validation",AI
+regression,"回归；（软件）功能退化","statistical regression; or software breaking",AI
+deterministic,"确定性的","same input, same output",AI
+stochastic,"随机的","involving randomness",AI
+heuristic,"启发式（经验法则）","practical rule of thumb",AI
+inference,"推理（模型前向）；推断","model forward pass; or logical deduction",AI
+forward pass,"前向传播（计算）","one model evaluation",AI
+backward pass,"反向传播（计算）","gradient computation pass",AI
+activation,"激活值","neuron output",AI
+epoch,"轮次","full pass over training data",AI
+hyperparameter,"超参数","configuration not learned from data",AI
+ablation study,"消融实验","systematic component-removal study",AI
+modality,"模态（数据类型如图像/文本）","a data type such as image or text",AI
+entity,"实体","distinct object of interest",AI
+ontology,"本体（知识表示的概念体系）","formal concept system",AI
+knowledge graph,"知识图谱","graph-structured knowledge base",AI
+common sense,"常识","everyday background knowledge",AI
+causality,"因果性","cause-effect relations",AI
+counterfactual,"反事实的","what-if contrary-to-fact reasoning",AI
+bayesian,"贝叶斯的","probabilistic inference à la Bayes",AI
+posterior,"后验（分布）","updated belief distribution",AI
+prior,"先验（分布）","belief before evidence",AI
+likelihood,"似然","probability of data given parameters",AI
+monte carlo,"蒙特卡洛（随机模拟）","random-sampling estimation",AI
+mcmc,"马尔可夫链蒙特卡洛","Markov chain Monte Carlo",AI
+gaussian process,"高斯过程","distribution over functions",AI
+kernel method,"核方法","similarity-based learning",AI
+support vector machine,"支持向量机","maximal-margin classifier",AI
+random forest,"随机森林","ensemble of decision trees",AI
+gradient boosting,"梯度提升","stagewise additive modeling",AI
+decision tree,"决策树","tree-structured rules",AI
+clustering,"聚类","grouping without labels",AI
+dimensionality reduction,"降维","compressing feature dimensions",AI
+manifold,"流形","low-dimensional structure in high-dimensional space",AI
+outlier,"离群点","atypical data point",AI
+smoothing,"平滑","reducing fluctuations",AI
+interpolation,"插值","values between known points",AI
+extrapolation,"外推","values beyond known range",AI
+residual,"残差","difference between observed and predicted",AI
+variance,"方差（统计/偏差-方差权衡）","spread of estimates",AI
+bias,"偏差；（神经网络）偏置","systematic error; or learnable offset",AI
+covariance,"协方差","joint variability",AI
+entropy,"熵（不确定性度量）","uncertainty measure",AI
+mutual information,"互信息","shared information between variables",AI
+markov property,"马尔可夫性","future independent of past given present",AI
+partially observable,"部分可观测的","state not fully visible",AI
+POMDP,"部分可观测马尔可夫决策过程","partially observable Markov decision process",AI
+MDP,"马尔可夫决策过程","Markov decision process",AI
+exploration-exploitation,"探索-利用权衡","balancing trying vs using knowledge",AI
+credit assignment,"功劳分配（结果归因到动作）","attributing outcomes to actions",AI
+sample efficiency,"样本效率","performance per environment sample",AI
+asymptotic,"渐近的","behavior as scale grows",AI
+convex,"凸的（优化问题）","optimization with global guarantees",AI
+non-convex,"非凸的","optimization with local optima",AI
+stochastic gradient descent,"随机梯度下降","SGD optimization",AI
+momentum,"动量（优化器）；动量（物理）","optimizer term; or physical quantity",AI
+annealing,"退火（学习率/温度渐降）","gradual cooling schedule",AI
+curriculum learning,"课程学习（由易到难训练）","staged training schedule",AI
+self-play,"自我对弈","agent improving by playing itself",AI
+asymmetric,"非对称的","unequal roles or structure",AI
+symmetry,"对称性","invariance property",AI
+equivariant,"等变的（变换前后表示协调变化）","representations transforming consistently",AI
+invariant,"不变的（对某变换不敏感）","unchanged under a transform",AI
+closed-loop,"闭环（有反馈的控制）","feedback control",AI
+open-loop,"开环（无反馈）","control without feedback",AI
+feedforward,"前馈（网络/控制）","information flows without feedback loops",AI
+feedback,"反馈","error-correcting signal",AI
+disturbance,"扰动（外部干扰）","external interference",AI
+overshoot,"超调","exceeding the target",AI
+steady-state error,"稳态误差","persistent error at equilibrium",AI
+setpoint,"设定值","desired target value",AI
+actuation,"驱动（执行动作）","producing physical motion",AI
+backlash,"回差（机械间隙）","mechanical play in joints",AI
+compliance,"柔顺性","mechanical softness",AI
+stiffness,"刚度","resistance to deformation",AI
+payload,"负载（有效载荷）","mass a robot can carry",AI
+reachability,"可达性（工作空间内可到达）","whether a pose is achievable",AI
+workspace,"工作空间（机械臂可达范围）","the set of reachable poses",AI
+singularity,"奇异（位形）","degenerate joint configuration",AI
+jacobian,"雅可比（矩阵）","velocity mapping matrix",AI
+centroid,"质心","center of mass",AI
+inertia,"惯量（转动惯量）","resistance to rotational acceleration",AI
+friction,"摩擦（力）","resistance to sliding",AI
+impulse,"冲量","force over time",AI
+complementarity,"互补性","paired constraints",AI
+holonomic,"完整约束的","constraint type in mechanics",AI
+nonholonomic,"非完整约束的","velocity-dependent constraints",AI

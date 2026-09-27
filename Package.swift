@@ -22,6 +22,8 @@ let package = Package(
             resources: [
                 // 内嵌只读词典（scripts/make_dictionary.py 生成）
                 .copy("Resources/dictionary.sqlite"),
+                // 术语覆盖库（scripts/make_terms.py 生成，查词最高优先级）
+                .copy("Resources/terms.sqlite"),
                 .process("Resources/en.lproj"),
                 .process("Resources/zh-Hans.lproj"),
             ]
