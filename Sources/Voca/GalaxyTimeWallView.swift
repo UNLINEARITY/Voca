@@ -58,18 +58,22 @@ struct GalaxyTimeWallView: View {
             )
             .simultaneousGesture(
                 SpatialTapGesture(count: 1).onEnded { value in
-                    guard let entry = TimeWallLayout.entry(
+                    if let entry = TimeWallLayout.entry(
                         at: value.location, in: layout(size: proxy.size)
-                    ) else { return }
-                    onSelect(
-                        GalaxyItem(
-                            clipId: TimeWallLayout.clipID(of: entry),
-                            text: GalaxyModel.displayText(entry.text),
-                            fontSize: 25,
-                            entry: entry,
-                            position: .zero
+                    ) {
+                        onSelect(
+                            GalaxyItem(
+                                clipId: TimeWallLayout.clipID(of: entry),
+                                text: GalaxyModel.displayText(entry.text),
+                                fontSize: 25,
+                                entry: entry,
+                                position: .zero
+                            )
                         )
-                    )
+                    } else {
+                        // 点空白＝取消选中（ESC 同效）
+                        model.selectedItem = nil
+                    }
                 }
             )
             .gesture(

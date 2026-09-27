@@ -518,18 +518,28 @@ final class GalaxyWindowController {
                 self.model.turnTimelinePage(with: event)
                 return nil
             }
-            // 检索档时间词墙：双指左右滑动沿时间轴浏览，捏合缩放时间轴（指针为锚）。
-            // 无边框窗口的滚轮/捏合事件常不带 window 归属，改按指针位置判定
+            // 时间线档：双指左右滑动/拖动＝平移；垂直滚轮或双指上下滚＝缩放（与捏合并存）
             if self.model.source == .search,
                event.type == .scrollWheel || event.type == .magnify,
                self.window?.frame.contains(NSEvent.mouseLocation) == true {
+                let width = self.window?.contentView?.bounds.width ?? 0
                 switch event.type {
                 case .scrollWheel:
-                    guard event.scrollingDeltaX != 0 else { return event }
-                    let width = self.window?.contentView?.bounds.width ?? 0
-                    // 自然滚动方向：内容跟随手指（含惯性阶段）
-                    self.model.panTimeWall(
-                        by: -Double(event.scrollingDeltaX), canvasWidth: width
+                    if event.scrollingDeltaX != 0 {
+                        // 自然滚动方向：内容跟随手指（含惯性阶段）
+                        self.model.panTimeWall(
+                            by: -Double(event.scrollingDeltaX), canvasWidth: width
+                        )
+                        return nil
+                    }
+                    guard event.momentumPhase == [], event.scrollingDeltaY != 0 else {
+                        return event
+                    }
+                    let sensitivity = event.hasPreciseScrollingDeltas ? 0.006 : 0.075
+                    self.model.zoomTimeWall(
+                        by: exp(event.scrollingDeltaY * sensitivity),
+                        anchorX: event.locationInWindow.x,
+                        canvasWidth: width
                     )
                     return nil
                 case .magnify:
