@@ -208,6 +208,9 @@ final class GalaxyModel: ObservableObject {
             ?? 1.0
     }
 
+    /// 调参面板开关：菜单栏「星图」菜单持有，会话内共享
+    @Published var showTuning = false
+
     func rebuild(from clips: [Clip], announceSampling: Bool = true) {
         let sampled: [Clip]
         if clips.count > Self.maxItems {
@@ -392,7 +395,7 @@ final class GalaxyWindowController {
 
     private var window: NSWindow?
     private var eventMonitor: Any?
-    private var model = GalaxyModel()
+    let model = GalaxyModel()
 
     var isOpen: Bool { window?.isVisible == true }
     var isActive: Bool { NSApp.isActive && window?.isKeyWindow == true }
@@ -546,7 +549,7 @@ private struct GalaxyView: View {
     @State private var promotedIDs: Set<UUID> = []
     @State private var timelineEvents: [ClipEvent] = []
     @State private var selectedTimelineIndex = 0
-    @State private var showTuning = false
+    @State private var searchDetailsExpanded = false
 
     var body: some View {
         GeometryReader { geometry in
@@ -581,37 +584,18 @@ private struct GalaxyView: View {
 
         return ZStack {
             if model.source == .search {
-                searchDanmakuLayer(geometry)
+                searchLayout
             } else {
                 sphere(diameter: radius * 2)
                     .position(x: geometry.size.width / 2, y: geometry.size.height / 2)
-            }
 
-            VStack {
-                topBar
-                Spacer()
-                if model.source == .search {
-                    if hasEmptySearchResult {
-                        Text("没有匹配的词条")
-                            .font(.system(size: chromeSize(-1)))
-                            .foregroundStyle(.secondary)
-                            .padding(.horizontal, 14)
-                            .padding(.vertical, 7)
-                            .glassEffect(.regular, in: Capsule())
-                            .padding(.bottom, 8)
-                            .transition(.opacity)
-                    }
-                    searchBar
-                        .padding(.bottom, 10)
-                        .onChange(of: model.searchQuery) { _, query in
-                            applySearchQuery(query)
-                        }
+                VStack {
+                    Spacer()
+                    selectionDetail(availableWidth: geometry.size.width)
                 }
-                selectionDetail(availableWidth: geometry.size.width)
+                .padding(20)
             }
-            .padding(20)
 
-            // 检索档为弹幕形态：选中信息在底部卡片，无需轨道属性环
             if let item = model.selectedItem, model.source != .search {
                 selectionOrbit(
                     item.entry,
@@ -622,7 +606,7 @@ private struct GalaxyView: View {
             }
 
             // 调参面板必须在选中轨道/时间线之上：否则全屏 Canvas 会拦截滑杆的点击
-            if showTuning {
+            if model.showTuning && model.source != .search {
                 tuningPanel
                     .padding(.leading, 24)
                     .frame(
@@ -644,7 +628,44 @@ private struct GalaxyView: View {
         return false
     }
 
-    /// 检索档弹幕层：全屏词库流；词库为空时给出引导
+    /// 检索档的三块区域由布局分配真实尺寸；弹幕画布与点击范围仅在中间。
+    private var searchLayout: some View {
+        VStack(spacing: 0) {
+            HStack(spacing: 0) {
+                if model.showTuning {
+                    tuningPanel
+                        .padding(.horizontal, 16)
+                        .frame(width: 286)
+                        .frame(maxHeight: .infinity, alignment: .top)
+                        .background(.regularMaterial)
+                }
+                GeometryReader { area in
+                    searchDanmakuLayer(area)
+                }
+            }
+
+            VStack(spacing: 10) {
+                if hasEmptySearchResult {
+                    Text("没有匹配的词条")
+                        .font(.system(size: chromeSize(-1)))
+                        .foregroundStyle(.secondary)
+                }
+                if let item = model.selectedItem, case .library(let clip) = item.entry {
+                    searchSelectionBar(clip)
+                }
+                searchBar
+                    .onChange(of: model.searchQuery) { _, query in
+                        applySearchQuery(query)
+                    }
+            }
+            .padding(.horizontal, 20)
+            .padding(.vertical, 14)
+            .frame(maxWidth: .infinity)
+            .background(.regularMaterial)
+        }
+    }
+
+    /// 仅将当前检索结果交给弹幕引擎；空查询仍展示整个词库。
     @ViewBuilder
     private func searchDanmakuLayer(_ geometry: GeometryProxy) -> some View {
         if store.clips.isEmpty {
@@ -658,7 +679,8 @@ private struct GalaxyView: View {
         } else {
             GalaxyDanmakuView(
                 model: model,
-                clips: store.clips,
+                clips: model.searchQuery.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+                    ? store.clips : searchFilteredClips(),
                 chromeBase: galaxyChromeFontSize,
                 reduceMotion: reduceMotion,
                 onSelect: { item in
@@ -671,6 +693,7 @@ private struct GalaxyView: View {
                 }
             )
             .frame(width: geometry.size.width, height: geometry.size.height)
+            .clipped()
         }
     }
 
@@ -715,6 +738,7 @@ private struct GalaxyView: View {
     }
 
     private func handleSelectionChange() {
+        searchDetailsExpanded = false
         if let item = model.selectedItem, case .library(let clip) = item.entry {
             timelineEvents = store.events(for: clip)
         } else {
@@ -724,9 +748,7 @@ private struct GalaxyView: View {
         model.isTimelineVisible = false
         model.timelinePage = 0
         selectedTimelineIndex = 0
-        if model.selectedItem != nil {
-            showTuning = false
-        }
+        model.showTuning = false
     }
 
     private func editSheet(for clip: Clip) -> some View {
@@ -881,64 +903,6 @@ private struct GalaxyView: View {
         Typography.derived(galaxyChromeFontSize, offset: offset)
     }
 
-    private var topBar: some View {
-        GlassEffectContainer(spacing: 12) {
-            HStack(spacing: 12) {
-                HStack(spacing: 9) {
-                    Image(systemName: "sparkles")
-                    Text("Voca 星图")
-                        .font(.system(size: chromeSize(), weight: .semibold))
-                    Text(L10n.format("%d 条", model.items.count))
-                        .font(.caption)
-                        .foregroundStyle(.secondary)
-                }
-                .padding(.leading, 16)
-                .padding(.trailing, 16)
-                .padding(.vertical, 10)
-                .glassEffect(.regular, in: Capsule())
-
-                Spacer()
-
-                Picker("星图内容", selection: $model.source) {
-                    Text("检索").tag(GalaxySource.search)
-                    Text("词库").tag(GalaxySource.library)
-                    Text("剪贴板").tag(GalaxySource.clipboard)
-                }
-                .pickerStyle(.segmented)
-                .frame(width: 230)
-                .help("切换星图内容")
-
-                Button {
-                    showTuning.toggle()
-                } label: {
-                    Image(systemName: "slider.horizontal.3")
-                        .frame(width: 20, height: 20)
-                }
-                .buttonStyle(.glass)
-                .help("实时调参")
-
-                // 与面板上的「星图」入口对称：星图侧也提供可见的返回入口
-                Button {
-                    WorkspaceNavigation.shared.returnToPanel()
-                } label: {
-                    Text("返回面板")
-                        .frame(height: 20)
-                }
-                .buttonStyle(.glass)
-                .help("回到工作区面板（⇧⌥↑）")
-
-                Button {
-                    GalaxyWindowController.shared.close()
-                } label: {
-                    Image(systemName: "xmark")
-                        .frame(width: 20, height: 20)
-                }
-                .buttonStyle(.glass)
-                .help("退出星图（ESC）")
-            }
-        }
-    }
-
     @ViewBuilder
     private func selectionDetail(availableWidth: CGFloat) -> some View {
         if let item = model.selectedItem {
@@ -965,12 +929,67 @@ private struct GalaxyView: View {
                 }
             }
             selectionActions(item.entry)
-        } else if model.source != .search {
-            hintBar
         }
     }
 
     /// 检索模式:球下方的词库检索框;聚焦时方向键保留原生文本编辑行为
+    private func searchSelectionBar(_ clip: Clip) -> some View {
+        VStack(alignment: .leading, spacing: 8) {
+            HStack(spacing: 12) {
+                Text(clip.text)
+                    .font(.system(size: chromeSize(), weight: .medium))
+                    .lineLimit(1)
+                    .truncationMode(.middle)
+                    .frame(maxWidth: .infinity, alignment: .leading)
+
+                Button(searchDetailsExpanded ? L10n.text("收起详情") : L10n.text("查看详情")) {
+                    searchDetailsExpanded.toggle()
+                }
+                Button("复制") {
+                    watcher.copyText(clip.text)
+                }
+                Button("查词") {
+                    LookupPopupController.shared.handleViewOnly(clip.text)
+                }
+                Menu("更多", systemImage: "ellipsis") {
+                    Button("编辑") { editingClip = clip }
+                    if let urlString = clip.url, let url = URL(string: urlString) {
+                        Button("打开来源网页") { NSWorkspace.shared.open(url) }
+                    }
+                    Button("删除", role: .destructive) { deletingEntry = .library(clip) }
+                }
+                Button {
+                    model.selectedItem = nil
+                } label: {
+                    Image(systemName: "xmark")
+                }
+                .help("取消选择")
+                .accessibilityLabel("取消选择")
+            }
+            .buttonStyle(.bordered)
+
+            if searchDetailsExpanded {
+                ScrollView {
+                    VStack(alignment: .leading, spacing: 8) {
+                        Text(clip.text)
+                        if let note = clip.note, !note.isEmpty {
+                            Divider()
+                            Text(note).foregroundStyle(.secondary)
+                        }
+                    }
+                    .frame(maxWidth: .infinity, alignment: .leading)
+                    .textSelection(.enabled)
+                }
+                .frame(maxHeight: 160)
+            }
+        }
+        .padding(12)
+        .frame(maxWidth: 720)
+        .background(.quaternary, in: RoundedRectangle(cornerRadius: Radius.card))
+        .accessibilityElement(children: .contain)
+        .accessibilityLabel("选中词条")
+    }
+
     private var searchBar: some View {
         HStack(spacing: 8) {
             Image(systemName: "magnifyingglass")
@@ -1003,15 +1022,6 @@ private struct GalaxyView: View {
     private func applySearchQuery(_ query: String) {
         guard model.source == .search else { return }
         model.rebuild(from: searchFilteredClips(), announceSampling: false)
-    }
-
-    private var hintBar: some View {
-        Text("拖拽或双指滑动旋转 · ESC 退出")
-            .font(.system(size: chromeSize(-1)))
-            .foregroundStyle(.secondary)
-            .padding(.horizontal, 16)
-            .padding(.vertical, 9)
-            .glassEffect(.regular, in: Capsule())
     }
 
     private func noteBelowSphere(
@@ -1061,11 +1071,12 @@ private struct GalaxyView: View {
                     }
                     .buttonStyle(.glass)
                     Button {
-                        showTuning = false
+                        model.showTuning = false
                     } label: {
                         Image(systemName: "xmark")
                     }
                     .buttonStyle(.glass)
+                    .help("收起")
                 }
 
                 VStack(alignment: .leading, spacing: 6) {
@@ -1498,9 +1509,13 @@ private struct GalaxyView: View {
             VStack(alignment: side == .left ? .trailing : .leading, spacing: 3) {
                 Text(L10n.text(title))
                     .font(.system(size: chromeSize(2), weight: .semibold))
+                    .lineLimit(1)
+                    .minimumScaleFactor(0.85)
+                    .truncationMode(.tail)
                     .foregroundStyle(.primary)
                 Text(value)
                     .font(.system(size: chromeSize(), weight: .semibold))
+                    .minimumScaleFactor(0.85)
                     .foregroundStyle(.primary)
                     .lineLimit(lineLimit)
                     .truncationMode(.tail)

@@ -152,7 +152,7 @@ struct GalaxyDanmakuView: View {
 
 /// 弹幕流引擎：按行调度词条生成与漂移，维护虚拟时钟以支持整屏减速。
 @MainActor
-private final class DanmakuEngine {
+final class DanmakuEngine {
     struct Word {
         let id: Int64
         let clipId: Int64
@@ -172,8 +172,9 @@ private final class DanmakuEngine {
     private(set) var words: [Word] = []
 
     private static let gap: CGFloat = 110
-    private static let topInset: CGFloat = 74
-    private static let bottomInset: CGFloat = 130
+    // The toolbar and search/selection controls live outside this canvas.
+    private static let topInset: CGFloat = 12
+    private static let bottomInset: CGFloat = 12
 
     private var deck: [GalaxyEntry] = []
     private var deckSignature = ""
@@ -239,7 +240,7 @@ private final class DanmakuEngine {
         }
         lastDate = date
 
-        let signature = "\(clips.count):\(clips.first?.id ?? -1):\(clips.first?.lastSeenAt.timeIntervalSince1970 ?? 0)"
+        let signature = "\(query):\(clips.count):\(clips.first?.id ?? -1):\(clips.first?.lastSeenAt.timeIntervalSince1970 ?? 0)"
         let windowChanged = laneCount == 0 || abs(laneGeometry.width - size.width) > 1
             || abs(laneGeometry.height - size.height) > 1
         let newLaneCount = Self.laneCount(size: size, fontScale: fontScale)
@@ -252,8 +253,9 @@ private final class DanmakuEngine {
             self.fontBase = fontBase
             widthCache = [:]
             lastByLane = [:]
-            prefill(size: size, clips: clips)
+            deckSignature = signature
             rebuildDeck(clips: clips)
+            prefill(size: size, clips: clips)
         } else if fontChanged {
             // 字号缩放：整流按比例平滑缩放（位置/速度/宽度同步），不重铺
             let ratio = fontBase / max(self.fontBase, 1)
@@ -261,7 +263,9 @@ private final class DanmakuEngine {
             rescale(ratio: ratio)
         } else if signature != deckSignature {
             deckSignature = signature
+            lastByLane = [:]
             rebuildDeck(clips: clips)
+            prefill(size: size, clips: clips)
         }
 
         let target: CGFloat = reduceMotion ? 0 : (slowDown ? 0.12 : 1)
@@ -295,20 +299,21 @@ private final class DanmakuEngine {
     }
 
     func laneCenter(_ row: Int) -> CGFloat {
-        let height = laneGeometry.height - Self.topInset - Self.bottomInset
+        let height = max(0, laneGeometry.height - Self.topInset - Self.bottomInset)
         return Self.topInset + height * (CGFloat(row) + 0.5) / CGFloat(max(laneCount, 1))
     }
 
     private static func laneCount(size: CGSize, fontScale: Double) -> Int {
-        let available = size.height - Self.topInset - Self.bottomInset
+        let available = max(0, size.height - Self.topInset - Self.bottomInset)
         let rowHeight = 56 * max(fontScale, 0.5)
-        return max(3, min(12, Int(available / rowHeight)))
+        return max(1, min(12, Int(available / rowHeight)))
     }
 
     /// 字号变化时整流等比缩放：位置、速度、宽度、胶囊尺寸同步，行中心不变
     private func rescale(ratio: CGFloat) {
         let laneHeight = (laneGeometry.height - Self.topInset - Self.bottomInset)
             / CGFloat(max(laneCount, 1))
+        guard laneHeight >= 32 else { return }
         words = words.map { word in
             var scaled = word
             scaled.fontSize = min(word.fontSize * ratio, laneHeight - 20)
@@ -329,12 +334,18 @@ private final class DanmakuEngine {
     /// 开场即满屏：按行预铺词条（随机相位），避免进入检索档后干等词条从左缘飘入
     private func prefill(size: CGSize, clips: [Clip]) {
         words = []
-        let laneHeight = (size.height - Self.topInset - Self.bottomInset) / CGFloat(max(laneCount, 1))
+        let laneHeight = max(0, size.height - Self.topInset - Self.bottomInset) / CGFloat(max(laneCount, 1))
+        guard laneHeight >= 32 else { return }
+        var visibleIDs = Set<Int64>()
         for lane in 0..<laneCount {
-            var x = -CGFloat.random(in: 0...(size.width * 0.4))
+            guard Self.activeLanes(itemCount: clips.count, laneCount: laneCount).contains(lane) else { continue }
+            var x = clips.count < laneCount
+                ? CGFloat.random(in: 0...(size.width * 0.4))
+                : -CGFloat.random(in: 0...(size.width * 0.4))
             var rearID: Int64?
-            while x < size.width {
+            while x < size.width && visibleIDs.count < clips.count {
                 guard let entry = takeNext(clips: clips),
+                      visibleIDs.insert(clipID(of: entry)).inserted,
                       let word = makeWord(
                           entry, row: lane, x: x, fontBase: fontBase,
                           laneHeight: laneHeight, clips: clips
@@ -352,12 +363,15 @@ private final class DanmakuEngine {
 
     private func spawn(lane: Int, clips: [Clip]) {
         // 屏内去重：同一词条不重复出现
+        guard words.count < clips.count,
+              Self.activeLanes(itemCount: clips.count, laneCount: laneCount).contains(lane)
+        else { return }
         for _ in 0..<5 {
             guard let entry = takeNext(clips: clips) else { return }
             if words.contains(where: { $0.clipId == clipID(of: entry) }) { continue }
             let laneHeight = (laneGeometry.height - Self.topInset - Self.bottomInset)
                 / CGFloat(max(laneCount, 1))
-            guard let word = makeWord(
+            guard laneHeight >= 32, let word = makeWord(
                 entry, row: lane, x: 0, fontBase: fontBase,
                 laneHeight: laneHeight, clips: clips
             ) else { continue }
@@ -367,6 +381,15 @@ private final class DanmakuEngine {
             lastByLane[lane] = spawned.id
             return
         }
+    }
+
+    /// 少量检索结果分散到中间行，而不是全部堆在第一行。
+    static func activeLanes(itemCount: Int, laneCount: Int) -> Set<Int> {
+        guard itemCount > 0, laneCount > 0 else { return [] }
+        let count = min(itemCount, laneCount)
+        return Set((0..<count).map { index in
+            Int((CGFloat(index) + 0.5) * CGFloat(laneCount) / CGFloat(count))
+        })
     }
 
     /// 牌堆：最近保存的 24 条洗牌后优先进场；每词条一次循环仅出现一次（频次改由字号体现）

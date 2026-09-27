@@ -234,7 +234,112 @@ struct VocaApp: App {
                 .accessibilityLabel("Voca")
         }
         .menuBarExtraStyle(.window)
+        .commands {
+            CommandMenu("星图") {
+                Button("打开检索星图") {
+                    openGalaxyFromMenu(.search)
+                }
+                Button("打开词库星图") {
+                    openGalaxyFromMenu(.library)
+                }
+                Button("打开剪贴板星图") {
+                    openGalaxyFromMenu(.clipboard)
+                }
+                Divider()
+                GalaxyTuningToggle()
+                Divider()
+                Button("退出星图") {
+                    GalaxyWindowController.shared.close()
+                }
+            }
+            CommandGroup(replacing: .help) {
+                Button("Voca 帮助") {
+                    HelpWindowController.shared.show()
+                }
+            }
+        }
+    }
 
+    /// 菜单入口：切换星图档位并确保星图打开
+    @MainActor
+    private func openGalaxyFromMenu(_ source: GalaxySource) {
+        GalaxyWindowController.shared.open(source: source)
+    }
+}
+
+/// 「设置」菜单的唯一项：开关星图浮动调参面板（面板本身保持不变）。
+@MainActor
+private struct GalaxyTuningToggle: View {
+    @ObservedObject private var model = GalaxyWindowController.shared.model
+
+    var body: some View {
+        Toggle("实时调参", isOn: $model.showTuning)
+            .keyboardShortcut(",", modifiers: .command)
+    }
+}
+
+/// 帮助窗口：收纳原星图内的操作提示（旋转/档位切换/返回/退出/弹幕交互）。
+@MainActor
+private final class HelpWindowController {
+    static let shared = HelpWindowController()
+
+    private var window: NSWindow?
+
+    func show() {
+        if let window {
+            window.makeKeyAndOrderFront(nil)
+            NSApp.activate(ignoringOtherApps: true)
+            return
+        }
+        let content = DisplayLanguageView(content: HelpContentView())
+        let window = NSWindow(
+            contentRect: NSRect(x: 0, y: 0, width: 460, height: 380),
+            styleMask: [.titled, .closable, .miniaturizable],
+            backing: .buffered,
+            defer: false
+        )
+        window.title = "Voca 帮助"
+        window.identifier = NSUserInterfaceItemIdentifier("voca.help")
+        window.contentView = NSHostingView(rootView: content)
+        window.isReleasedWhenClosed = false
+        window.center()
+        self.window = window
+        window.makeKeyAndOrderFront(nil)
+        NSApp.activate(ignoringOtherApps: true)
+    }
+}
+
+private struct HelpContentView: View {
+    var body: some View {
+        ScrollView {
+            VStack(alignment: .leading, spacing: 14) {
+                helpSection("星图", items: [
+                    "拖拽或双指滑动旋转球体",
+                    "⇧⌥←→ 切换检索 / 词库 / 剪贴板",
+                    "⇧⌥↓ 进入星图 · ⇧⌥↑ 返回工作区",
+                    "ESC 关闭查词浮窗或退出星图",
+                ])
+                helpSection("弹幕（检索档）", items: [
+                    "单击词条选中，底部显示操作栏",
+                    "双击词条打开查词浮窗",
+                    "滚轮 / 双指滚动缩放文字",
+                ])
+            }
+            .padding(24)
+            .frame(maxWidth: .infinity, alignment: .leading)
+        }
+    }
+
+    private func helpSection(_ title: String, items: [String]) -> some View {
+        VStack(alignment: .leading, spacing: 8) {
+            Text(L10n.text(title))
+                .font(.headline)
+            ForEach(items, id: \.self) { item in
+                Text(L10n.text(item))
+                    .font(.system(size: 13))
+                    .foregroundStyle(.secondary)
+            }
+        }
     }
 }
 
