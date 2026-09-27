@@ -88,4 +88,4 @@ swift test
 
 The Swift package uses [GRDB](https://github.com/groue/GRDB.swift) for SQLite and [KeyboardShortcuts](https://github.com/sindresorhus/KeyboardShortcuts) for configurable global shortcuts (both MIT-licensed). New source files must retain the project's AGPL header. See [AGENTS.md](AGENTS.md) for contribution and safety requirements.
 
-Voca is licensed under [AGPL-3.0-or-later](LICENSE). © 2026 [UNLINEARITY](https://github.com/UNLINEARITY).
+Voca is licensed under [AGPL-3.0-or-later](LICENSE). © 2026 [UNLINEARITY](https://github.com/UNLINEARITY) · [unlinearity@gmail.com](mailto:unlinearity@gmail.com).

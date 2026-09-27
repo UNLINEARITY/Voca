@@ -32,6 +32,10 @@
 "光斑强度" = "Caustic intensity";
 "六级" = "CET-6";
 "关于" = "About";
+"作者" = "Author";
+"版权" = "Copyright";
+"许可证" = "License";
+"本程序为自由软件，基于 GNU AGPL-3.0-or-later 许可发布；© 2026 UNLINEARITY" = "This program is free software under GNU AGPL-3.0-or-later; © 2026 UNLINEARITY";
 "关闭" = "Close";
 "内圈起始" = "Inner rim start";
 "内容" = "Content";

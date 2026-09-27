@@ -1,0 +1,58 @@
+# Continuous integration for pull requests and pushes to main.
+#
+# Runs the full gate (swift build -> swift test -> ./build.sh bundle) on a
+# macOS runner. Voca targets macOS 26+, so the runner image must carry a
+# matching Xcode; macos-latest tracks the newest image GitHub provides.
+# To make this gate block merges, enable branch protection on `main`:
+#   Settings -> Branches -> Edit rule for `main`
+#   -> "Require status checks to pass before merging" -> select Quality.
+# 若需让门禁真正阻止不合格 PR 合并，请在 main 分支保护规则中勾选
+# "Require status checks to pass before merging" 并选中 Quality 检查。
+
+name: CI
+
+on:
+  pull_request:
+    branches: [main]
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+# Cancel superseded runs on the same ref to save runner time.
+concurrency:
+  group: ci-${{ github.ref }}-${{ github.event_name }}
+  cancel-in-progress: true
+
+jobs:
+  quality:
+    name: Quality (macOS)
+    runs-on: macos-latest
+    timeout-minutes: 30
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      # Cache SwiftPM's build directory keyed on the resolved dependency
+      # manifest so repeated runs skip re-fetching/rebuilding GRDB and
+      # KeyboardShortcuts.
+      - name: Cache SwiftPM
+        uses: actions/cache@v4
+        with:
+          path: .build
+          key: ${{ runner.os }}-spm-${{ hashFiles('Package.resolved') }}
+          restore-keys: ${{ runner.os }}-spm-
+
+      - name: Build
+        run: swift build
+
+      - name: Test
+        run: swift test
+
+      # Assembles the release bundle (ad-hoc signed on CI; the "Voca
+      # Development" identity only exists on the author's machine).
+      - name: Bundle app
+        run: ./build.sh

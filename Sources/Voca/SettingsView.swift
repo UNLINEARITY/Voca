@@ -233,6 +233,26 @@ struct SettingsView: View {
                         as? String ?? "0.1.0"
                 )
             }
+            LabeledContent("作者") {
+                HStack(spacing: 10) {
+                    Link("UNLINEARITY", destination: URL(string: "https://github.com/UNLINEARITY")!)
+                    Text("·")
+                        .foregroundStyle(.secondary)
+                    Link(
+                        "unlinearity@gmail.com",
+                        destination: URL(string: "mailto:unlinearity@gmail.com")!
+                    )
+                }
+            }
+            LabeledContent("版权") {
+                Text("© 2026 UNLINEARITY")
+            }
+            LabeledContent("许可证") {
+                Link(
+                    "AGPL-3.0-or-later",
+                    destination: URL(string: "https://www.gnu.org/licenses/agpl-3.0.html")!
+                )
+            }
             if let meta = DictionaryService.shared.meta {
                 LabeledContent("内嵌词典") {
                     Text(L10n.format("%d 条 · %@（%@）", meta.entries, meta.source, meta.license))
@@ -246,6 +266,9 @@ struct SettingsView: View {
                 }
             }
             Text("查词与翻译完全离线：词典内嵌于应用，翻译与发音使用系统能力")
+                .font(.caption)
+                .foregroundStyle(.secondary)
+            Text("本程序为自由软件，基于 GNU AGPL-3.0-or-later 许可发布；© 2026 UNLINEARITY")
                 .font(.caption)
                 .foregroundStyle(.secondary)
         }

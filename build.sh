@@ -9,6 +9,12 @@ cd "$(dirname "$0")"
 echo "==> swift build -c release"
 swift build -c release
 
+# 版本单一来源：最近的 git tag（发布时推 x.y.z tag）；无 tag 时回退 0.1.0。
+# 构建号用提交数，保证同版本内每次构建递增。
+VERSION="$(git describe --tags --abbrev=0 2>/dev/null || echo 0.1.0)"
+BUILD="$(git rev-list HEAD --count 2>/dev/null || echo 1)"
+echo "==> 版本 $VERSION (build $BUILD)"
+
 APP="build/Voca.app"
 rm -rf "$APP"
 mkdir -p "$APP/Contents/MacOS"
@@ -46,7 +52,7 @@ done
 iconutil -c icns "$ICONSET" -o "$APP/Contents/Resources/Voca.icns"
 rm -r "$ICONSET"
 
-cat > "$APP/Contents/Info.plist" <<'EOF'
+cat > "$APP/Contents/Info.plist" <<EOF
 <?xml version="1.0" encoding="UTF-8"?>
 <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
 <plist version="1.0">
@@ -68,9 +74,9 @@ cat > "$APP/Contents/Info.plist" <<'EOF'
     <key>CFBundlePackageType</key>
     <string>APPL</string>
     <key>CFBundleShortVersionString</key>
-    <string>0.1.0</string>
+    <string>${VERSION}</string>
     <key>CFBundleVersion</key>
-    <string>1</string>
+    <string>${BUILD}</string>
     <key>LSMinimumSystemVersion</key>
     <string>26.0</string>
     <key>LSUIElement</key>
@@ -102,7 +108,7 @@ cat > "$APP/Contents/Info.plist" <<'EOF'
         </dict>
     </array>
     <key>NSHumanReadableCopyright</key>
-    <string>Personal use</string>
+    <string>Copyright © 2026 UNLINEARITY — AGPL-3.0-or-later</string>
 </dict>
 </plist>
 EOF

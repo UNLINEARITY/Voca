@@ -88,4 +88,4 @@ swift test
 
 Swift 软件包使用 [GRDB](https://github.com/groue/GRDB.swift) 管理 SQLite，使用 [KeyboardShortcuts](https://github.com/sindresorhus/KeyboardShortcuts) 录制全局快捷键（两者均采用 MIT 许可）。新源文件须保留项目的 AGPL 文件头。贡献和安全约束见 [AGENTS.md](AGENTS.md)。
 
-Voca 采用 [AGPL-3.0-or-later](LICENSE) 许可，© 2026 [UNLINEARITY](https://github.com/UNLINEARITY)。
+Voca 采用 [AGPL-3.0-or-later](LICENSE) 许可，© 2026 [UNLINEARITY](https://github.com/UNLINEARITY) · [unlinearity@gmail.com](mailto:unlinearity@gmail.com)。

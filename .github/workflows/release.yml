@@ -1,0 +1,90 @@
+# Release automation for version tags (e.g. 2.1.0).
+#
+# Pushing a plain x.y.z tag runs the full gate (build -> test -> bundle),
+# then zips build/Voca.app and creates a GitHub Release whose body combines
+# docs/releases/<tag>_CN.md (curated Chinese notes, required) and optionally
+# docs/releases/<tag>.md (English) with the notes GitHub auto-generates
+# (commit/PR list and full-changelog diff link). A failed gate leaves no
+# release behind. Version injected into Info.plist comes from the tag itself.
+# 发布流程：先写 docs/releases/<tag>_CN.md（必填，可另附 <tag>.md 英文版），
+# 再推 x.y.z tag；门禁通过后自动打包 zip 并创建 Release。
+
+name: Release
+
+on:
+  push:
+    tags:
+      # Plain x.y.z tags like 2.1.0. Glob has no "+" quantifier, so each
+      # segment is "one digit followed by anything".
+      - "[0-9]*.[0-9]*.[0-9]*"
+
+permissions:
+  contents: write
+
+concurrency:
+  group: release-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  release:
+    name: Quality gate and GitHub release
+    runs-on: macos-latest
+    timeout-minutes: 30
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Cache SwiftPM
+        uses: actions/cache@v4
+        with:
+          path: .build
+          key: ${{ runner.os }}-spm-${{ hashFiles('Package.resolved') }}
+          restore-keys: ${{ runner.os }}-spm-
+
+      - name: Build
+        run: swift build
+
+      - name: Test
+        run: swift test
+
+      - name: Bundle app
+        run: ./build.sh
+
+      - name: Verify release notes exist
+        run: |
+          TAG="${GITHUB_REF_NAME}"
+          if [ ! -f "docs/releases/${TAG}_CN.md" ]; then
+            echo "docs/releases/${TAG}_CN.md is missing; refusing to publish a release without notes." >&2
+            exit 1
+          fi
+
+      - name: Package zip
+        run: |
+          set -euo pipefail
+          TAG="${GITHUB_REF_NAME}"
+          cd build
+          ditto -c -k --sequesterRsrc --keepParent Voca.app "Voca-${TAG}-macOS.zip"
+
+      - name: Create GitHub release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          TAG="${GITHUB_REF_NAME}"
+          # Start from GitHub's auto-generated notes (What's Changed, full changelog).
+          gh release create "$TAG" \
+            --title "$TAG" --verify-tag --generate-notes \
+            "build/Voca-${TAG}-macOS.zip"
+          # Prepend curated notes (Chinese required, English optional) above the generated part.
+          GENERATED="$(gh release view "$TAG" --json body -q .body)"
+          {
+            cat "docs/releases/${TAG}_CN.md"
+            if [ -f "docs/releases/${TAG}.md" ]; then
+              printf '\n---\n\n'
+              cat "docs/releases/${TAG}.md"
+            fi
+            printf '\n---\n\n'
+            printf '%s\n' "$GENERATED"
+          } > /tmp/release-notes.md
+          gh release edit "$TAG" --notes-file /tmp/release-notes.md
