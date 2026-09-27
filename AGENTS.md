@@ -107,4 +107,5 @@ Historical platform findings and the current galaxy implementation are reference
 
 1. Implement → run `swift build` cleanly → run `./build.sh` → relaunch the newly built app → hand it to the user for testing.
 2. **Never write `log.md` or `git-log.md`, and never create a Git commit, until the user has tested the change and explicitly asked.** Automated verification does not replace user acceptance.
-3. For a requested commit, stage only project files, verify `git diff --cached --name-only` excludes local-only material, use an English Conventional Commit summary with mirrored English and Chinese description paragraphs, and report the commit hash.
+3. For a requested commit, stage only project files, verify `git diff --cached --name-only` excludes local-only material, use an English Conventional Commit summary with mirrored English and Chinese description paragraphs (each 2–3 concise sentences), and report the commit hash.
+4. External contributions are merged only with the contribution-license acknowledgment checked in the PR (see CONTRIBUTING.md); do not merge PRs lacking it.
