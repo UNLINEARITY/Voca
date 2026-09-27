@@ -73,13 +73,13 @@ struct DictionaryCardView: View {
                     SpeechService.shared.speak(entry.word, accent: accent)
                 } label: {
                     Label(
-                        accent == .british ? "英" : "美",
+                        accent == .british ? L10n.text("英") : L10n.text("美"),
                         systemImage: "speaker.wave.2"
                     )
                     .font(.system(size: popupFontSize))
                 }
                 .buttonStyle(.borderless)
-                .help(accent == .british ? "英音朗读" : "美音朗读")
+                .help(accent == .british ? L10n.text("英音朗读") : L10n.text("美音朗读"))
             }
         }
     }
@@ -124,7 +124,7 @@ struct DictionaryCardView: View {
                 Divider().padding(.vertical, 1)
                 VStack(alignment: .leading, spacing: 3) {
                     sectionLabel("词形家族")
-                    Text(e.family.map { "\($0.label) \($0.form)" }.joined(separator: " · "))
+                    Text(e.family.map { "\(L10n.text($0.label)) \($0.form)" }.joined(separator: " · "))
                         .font(.system(size: Typography.derived(popupFontSize, offset: -1)))
                         .textSelection(.enabled)
                 }
@@ -159,7 +159,7 @@ struct DictionaryCardView: View {
         VStack(alignment: .leading, spacing: 3) {
             HStack(spacing: 6) {
                 sectionLabel("词根拆解")
-                Text(roots.allSatisfy(\.direct) ? "标注" : "拆解")
+                Text(roots.allSatisfy(\.direct) ? L10n.text("标注") : L10n.text("拆解"))
                     .font(.caption2)
                     .padding(.horizontal, 4)
                     .padding(.vertical, 1)
@@ -194,8 +194,8 @@ struct DictionaryCardView: View {
             let examples = roots.flatMap(\.examples)
                 .filter { $0.lowercased() != entry.word.lowercased() }
             if !origin.isEmpty || !examples.isEmpty {
-                Text(([origin.isEmpty ? nil : "词源：\(origin)"]
-                    + (examples.isEmpty ? [] : ["同根：\(examples.prefix(6).joined(separator: ", "))"]))
+                Text(([origin.isEmpty ? nil : L10n.format("词源：%@", origin)]
+                    + (examples.isEmpty ? [] : [L10n.format("同根：%@", examples.prefix(6).joined(separator: ", "))]))
                     .compactMap { $0 }
                     .joined(separator: " · "))
                     .font(.system(size: Typography.derived(popupFontSize, offset: -2)))
@@ -219,7 +219,7 @@ struct DictionaryCardView: View {
     }
 
     private func sectionLabel(_ title: String) -> some View {
-        Text(title)
+        Text(L10n.text(title))
             .font(.caption)
             .fontWeight(.semibold)
             .foregroundStyle(.primary)
@@ -251,16 +251,16 @@ struct DictionaryCardView: View {
         let tags = DictionaryService.localizedTags(entry.tag)
         var parts: [String] = []
         if entry.collins > 0 {
-            parts.append("柯林斯" + String(repeating: "★", count: entry.collins))
+            parts.append(L10n.text("柯林斯") + String(repeating: "★", count: entry.collins))
         }
         if entry.oxford == 1 {
-            parts.append("牛津3000")
+            parts.append(L10n.text("牛津3000"))
         }
-        parts.append(contentsOf: tags)
+        parts.append(contentsOf: tags.map { L10n.text($0) })
         if entry.frq > 0 {
-            parts.append("词频 #\(entry.frq)")
+            parts.append(L10n.format("词频 #%d", entry.frq))
         } else if entry.bnc > 0 {
-            parts.append("词频 #\(entry.bnc)")
+            parts.append(L10n.format("词频 #%d", entry.bnc))
         }
         return Group {
             if parts.isEmpty {

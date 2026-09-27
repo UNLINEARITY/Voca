@@ -77,9 +77,9 @@ final class AppModel: ObservableObject {
     var gestureStatusText: String {
         switch threeFingerSaveStatus {
         case .off: return ""
-        case .unavailable: return "当前系统不支持触控板监听；保存快捷键仍可使用。"
-        case .waiting: return "等待内建或外接触控板；保存快捷键仍可使用。"
-        case .ready: return "若与 App Exposé 冲突，请在系统设置中手动改为四指下滑或关闭该手势。"
+        case .unavailable: return L10n.text("当前系统不支持触控板监听；保存快捷键仍可使用。")
+        case .waiting: return L10n.text("等待内建或外接触控板；保存快捷键仍可使用。")
+        case .ready: return L10n.text("若与 App Exposé 冲突，请在系统设置中手动改为四指下滑或关闭该手势。")
         }
     }
 
@@ -118,12 +118,12 @@ final class AppModel: ObservableObject {
                         text, appName: appName, bundleID: bundleID, url: url
                     )
                 case .emptySelection:
-                    ToastController.shared.show("未检测到选中文本")
+                    ToastController.shared.show(L10n.text("未检测到选中文本"))
                 case .notTrusted:
-                    ToastController.shared.show("需要辅助功能权限，正在打开系统设置…")
+                    ToastController.shared.show(L10n.text("需要辅助功能权限，正在打开系统设置…"))
                     CaptureEngine.shared.requestTrust()
                 case .secureField:
-                    ToastController.shared.show("已跳过安全输入框（密码）")
+                    ToastController.shared.show(L10n.text("已跳过安全输入框（密码）"))
                 }
             }
         }
@@ -140,22 +140,22 @@ final class AppModel: ObservableObject {
                     bundleID: bundleID,
                     url: url
                 )
-                let suffix = appName.map { " · 来自 \($0)" } ?? ""
+                let suffix = appName.map { L10n.format(" · 来自 %@", $0) } ?? ""
                 if clip.count > 1 {
-                    ToastController.shared.showSaved("第 \(clip.count) 次记录，已置顶\(suffix)")
+                    ToastController.shared.showSaved(L10n.format("第 %d 次记录，已置顶%@", clip.count, suffix))
                 } else {
-                    ToastController.shared.showSaved("已保存\(suffix)")
+                    ToastController.shared.showSaved(L10n.format("已保存%@", suffix))
                 }
             } catch {
-                ToastController.shared.show("保存失败：\(error.localizedDescription)")
+                ToastController.shared.show(L10n.format("保存失败：%@", error.localizedDescription))
             }
         case .emptySelection:
-            ToastController.shared.show("未检测到选中文本")
+            ToastController.shared.show(L10n.text("未检测到选中文本"))
         case .notTrusted:
-            ToastController.shared.show("需要辅助功能权限，正在打开系统设置…")
+            ToastController.shared.show(L10n.text("需要辅助功能权限，正在打开系统设置…"))
             CaptureEngine.shared.requestTrust()
         case .secureField:
-            ToastController.shared.show("已跳过安全输入框（密码）")
+            ToastController.shared.show(L10n.text("已跳过安全输入框（密码）"))
         }
     }
 }
@@ -226,9 +226,9 @@ struct VocaApp: App {
 
     var body: some Scene {
         MenuBarExtra {
-            MenuBarView()
+            DisplayLanguageView(content: MenuBarView()
                 .environmentObject(model.store)
-                .environmentObject(model.clipboardWatcher)
+                .environmentObject(model.clipboardWatcher))
         } label: {
             Image(nsImage: VocaMenuBarArtwork.image)
                 .accessibilityLabel("Voca")
@@ -274,7 +274,7 @@ struct MenuBarView: View {
                     .foregroundStyle(.secondary)
                 Text("Voca").font(.headline)
                 Spacer()
-                Text("\(store.clips.count) 条")
+                Text(L10n.format("%d 条", store.clips.count))
                     .font(.caption)
                     .foregroundStyle(.secondary)
             }
@@ -433,7 +433,7 @@ struct RecordsView: View {
                 }
                 Button("取消", role: .cancel) {}
             } message: {
-                Text("将永久删除全部 \(store.clips.count) 个词条及其时间线")
+                Text(L10n.format("将永久删除全部 %d 个词条及其时间线", store.clips.count))
             }
         }
     }
@@ -443,13 +443,13 @@ struct RecordsView: View {
         panel.allowedContentTypes = [.plainText]
         let formatter = DateFormatter()
         formatter.dateFormat = "yyyyMMdd-HHmm"
-        panel.nameFieldStringValue = "Voca-导出-\(formatter.string(from: Date())).md"
+        panel.nameFieldStringValue = L10n.format("Voca-导出-%@.md", formatter.string(from: Date()))
         guard panel.runModal() == .OK, let url = panel.url else { return }
         do {
             try store.exportMarkdown().write(to: url, atomically: true, encoding: .utf8)
-            ToastController.shared.show("已导出：\(url.lastPathComponent)")
+            ToastController.shared.show(L10n.format("已导出：%@", url.lastPathComponent))
         } catch {
-            ToastController.shared.show("导出失败：\(error.localizedDescription)")
+            ToastController.shared.show(L10n.format("导出失败：%@", error.localizedDescription))
         }
     }
 }
@@ -508,7 +508,7 @@ struct ClipRow: View {
                         Image(systemName: expanded ? "chevron.up" : "chevron.down")
                     }
                     .buttonStyle(.borderless)
-                    .help(expanded ? "收起" : "展开全文")
+                    .help(expanded ? L10n.text("收起") : L10n.text("展开全文"))
                 }
                 Button {
                     watcher.copyText(clip.text)
@@ -647,7 +647,7 @@ struct ClipTimelineSheet: View {
 
     var body: some View {
         VStack(alignment: .leading, spacing: 12) {
-            Text("时间线 · 共 \(clip.count) 次记录")
+            Text(L10n.format("时间线 · 共 %d 次记录", clip.count))
                 .font(.headline)
 
             Text(clip.text)
@@ -665,7 +665,7 @@ struct ClipTimelineSheet: View {
                     HStack {
                         VStack(alignment: .leading, spacing: 2) {
                             Text(event.date.formatted(date: .abbreviated, time: .standard))
-                            Text(event.appName ?? "未知来源")
+                            Text(event.appName ?? L10n.text("未知来源"))
                                 .foregroundStyle(.secondary)
                         }
                         Spacer()
@@ -676,7 +676,7 @@ struct ClipTimelineSheet: View {
                                 Image(systemName: "link")
                             }
                             .buttonStyle(.borderless)
-                            .help("打开来源网页：\(urlString)")
+                            .help(L10n.format("打开来源网页：%@", urlString))
                         }
                     }
                     .font(.system(size: listFontSize))

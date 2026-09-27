@@ -217,7 +217,7 @@ final class GalaxyModel: ObservableObject {
                     .prefix(Self.maxItems)
             )
             if announceSampling {
-                ToastController.shared.show("星图显示前 \(Self.maxItems) 条（按频次与最近度）")
+                ToastController.shared.show(L10n.format("星图显示前 %d 条（按频次与最近度）", Self.maxItems))
             }
         } else {
             sampled = clips
@@ -242,7 +242,7 @@ final class GalaxyModel: ObservableObject {
         let sampled: [ClipboardEntry]
         if textEntries.count > Self.maxItems {
             sampled = Array(textEntries.prefix(Self.maxItems))
-            ToastController.shared.show("星图显示前 \(Self.maxItems) 条（按最近复制）")
+            ToastController.shared.show(L10n.format("星图显示前 %d 条（按最近复制）", Self.maxItems))
         } else {
             sampled = textEntries
         }
@@ -430,7 +430,7 @@ final class GalaxyWindowController {
                 backing: .buffered,
                 defer: false
             )
-            window.contentView = NSHostingView(rootView: contentView)
+            window.contentView = NSHostingView(rootView: DisplayLanguageView(content: contentView))
             window.isReleasedWhenClosed = false
             window.isOpaque = false
             window.backgroundColor = .clear
@@ -565,7 +565,7 @@ private struct GalaxyView: View {
             editSheet(for: clip)
         }
         .confirmationDialog(
-            deletingClipboard ? "移除这条剪贴板记录？" : "删除这个词条？",
+            deletingClipboard ? L10n.text("移除这条剪贴板记录？") : L10n.text("删除这个词条？"),
             isPresented: deletingEntryBinding,
             titleVisibility: .visible
         ) {
@@ -749,7 +749,7 @@ private struct GalaxyView: View {
     @ViewBuilder
     private var deleteDialogActions: some View {
         Button(
-            deletingClipboard ? "移除剪贴板记录" : "删除词条（不可恢复）",
+            deletingClipboard ? L10n.text("移除剪贴板记录") : L10n.text("删除词条（不可恢复）"),
             role: .destructive
         ) {
             deleteSelectedEntry()
@@ -762,8 +762,8 @@ private struct GalaxyView: View {
     private var deleteDialogMessage: Text {
         Text(
             deletingClipboard
-                ? "仅从剪贴板历史移除，不影响已入库的词条。"
-                : "将永久删除该词条及其全部时间线事件，不影响剪贴板历史。")
+                ? L10n.text("仅从剪贴板历史移除，不影响已入库的词条。")
+                : L10n.text("将永久删除该词条及其全部时间线事件，不影响剪贴板历史。"))
     }
 
     /// 双击词条 → 弹出编辑面板(剪贴板条目无编辑界面,忽略)
@@ -848,19 +848,19 @@ private struct GalaxyView: View {
                 if model.items.isEmpty {
                     ContentUnavailableView(
                         model.source == .library
-                            ? "星图还是空的"
+                            ? L10n.text("星图还是空的")
                             : model.source == .clipboard
-                                ? "暂无剪贴板文字"
-                                : model.searchQuery.isEmpty ? "输入关键词检索" : "没有匹配的词条",
+                                ? L10n.text("暂无剪贴板文字")
+                                : model.searchQuery.isEmpty ? L10n.text("输入关键词检索") : L10n.text("没有匹配的词条"),
                         systemImage: "sparkles",
                         description: Text(
                             model.source == .library
-                                ? "保存一些文字后，它们会出现在这里。"
+                                ? L10n.text("保存一些文字后，它们会出现在这里。")
                                 : model.source == .clipboard
-                                    ? "复制文字后，它会出现在这里；图片和文件仍可在剪贴板历史中查看。"
+                                    ? L10n.text("复制文字后，它会出现在这里；图片和文件仍可在剪贴板历史中查看。")
                                     : model.searchQuery.isEmpty
-                                        ? "在下方输入关键词，球面会显示词库中匹配的词条。"
-                                        : "换个关键词试试。"
+                                        ? L10n.text("在下方输入关键词，球面会显示词库中匹配的词条。")
+                                        : L10n.text("换个关键词试试。")
                         )
                     )
                     .frame(maxWidth: diameter * 0.56)
@@ -888,7 +888,7 @@ private struct GalaxyView: View {
                     Image(systemName: "sparkles")
                     Text("Voca 星图")
                         .font(.system(size: chromeSize(), weight: .semibold))
-                    Text("\(model.items.count) 条")
+                    Text(L10n.format("%d 条", model.items.count))
                         .font(.caption)
                         .foregroundStyle(.secondary)
                 }
@@ -953,7 +953,7 @@ private struct GalaxyView: View {
                         noteBelowSphere(
                             detail,
                             availableWidth: availableWidth,
-                            label: note == nil ? "原文" : "原文与备注"
+                            label: note == nil ? L10n.text("原文") : L10n.text("原文与备注")
                         )
                     } else if let note {
                         noteBelowSphere(note, availableWidth: availableWidth)
@@ -1132,7 +1132,7 @@ private struct GalaxyView: View {
     ) -> some View {
         VStack(alignment: .leading, spacing: 4) {
             HStack {
-                Text(title).font(.caption)
+                Text(L10n.text(title)).font(.caption)
                 Spacer()
                 Text(String(format: format, value.wrappedValue))
                     .font(.caption.monospacedDigit())
@@ -1206,8 +1206,8 @@ private struct GalaxyView: View {
         .frame(width: canvasSize.width, height: canvasSize.height)
         .accessibilityElement(children: .contain)
         .accessibilityLabel(
-            model.source == .clipboard ? "剪贴板属性"
-                : model.isTimelineVisible ? "词条时间线" : "词条属性"
+            model.source == .clipboard ? L10n.text("剪贴板属性")
+                : model.isTimelineVisible ? L10n.text("词条时间线") : L10n.text("词条属性")
         )
     }
 
@@ -1222,7 +1222,7 @@ private struct GalaxyView: View {
         let leftX = center.x - radius - Self.orbitLabelGap - sideWidth / 2
         let rightX = center.x + radius + Self.orbitLabelGap + sideWidth / 2
         let sourceURL = entry.url.flatMap(URL.init(string:))
-        let sourceName = sourceURL?.host ?? "无网页来源"
+        let sourceName = sourceURL?.host ?? L10n.text("无网页来源")
 
         return ZStack {
             orbitConnectorGuide(
@@ -1233,7 +1233,7 @@ private struct GalaxyView: View {
 
             orbitAttribute(
                 title: "来源应用",
-                value: entry.appName ?? "未知来源",
+                value: entry.appName ?? L10n.text("未知来源"),
                 systemImage: "app.dashed",
                 appBundleID: entry.bundleID,
                 side: .left
@@ -1266,7 +1266,7 @@ private struct GalaxyView: View {
             case .library(let clip):
                 orbitAttribute(
                     title: "保存次数",
-                    value: "\(clip.count) 次",
+                    value: L10n.format("%d 次记录", clip.count),
                     systemImage: "square.stack.3d.up",
                     side: .right
                 )
@@ -1275,7 +1275,7 @@ private struct GalaxyView: View {
 
                 orbitAttribute(
                     title: "时间线",
-                    value: timelineEvents.isEmpty ? "无记录" : "\(timelineEvents.count) 次记录",
+                    value: timelineEvents.isEmpty ? L10n.text("无记录") : L10n.format("%d 次记录", timelineEvents.count),
                     systemImage: "clock.arrow.circlepath",
                     side: .right,
                     action: timelineEvents.isEmpty ? nil : {
@@ -1300,7 +1300,7 @@ private struct GalaxyView: View {
 
                 orbitAttribute(
                     title: "文本长度",
-                    value: "\(clipboard.text?.count ?? 0) 字符",
+                    value: L10n.format("%d 字符", clipboard.text?.count ?? 0),
                     systemImage: "textformat",
                     side: .right
                 )
@@ -1343,7 +1343,7 @@ private struct GalaxyView: View {
             if events.isEmpty {
                 orbitAttribute(
                     title: "时间线",
-                    value: "暂无记录",
+                    value: L10n.text("暂无记录"),
                     systemImage: "clock",
                     side: .left
                 )
@@ -1496,7 +1496,7 @@ private struct GalaxyView: View {
             }
 
             VStack(alignment: side == .left ? .trailing : .leading, spacing: 3) {
-                Text(title)
+                Text(L10n.text(title))
                     .font(.system(size: chromeSize(2), weight: .semibold))
                     .foregroundStyle(.primary)
                 Text(value)
@@ -1634,7 +1634,7 @@ private struct GalaxyView: View {
                         }
                         .buttonStyle(.glass)
                         .disabled(promotedIDs.contains(clipboard.id))
-                        .help(promotedIDs.contains(clipboard.id) ? "已入库" : "收入词库")
+                        .help(promotedIDs.contains(clipboard.id) ? L10n.text("已入库") : L10n.text("收入词库"))
                     }
 
                     if let urlString = entry.url, let url = URL(string: urlString) {
@@ -1656,15 +1656,15 @@ private struct GalaxyView: View {
                             .frame(width: 20, height: 20)
                     }
                     .buttonStyle(.glass)
-                    .help(isClipboardEntry ? "移除剪贴板记录" : "删除词条")
-                    .accessibilityLabel(isClipboardEntry ? "移除剪贴板记录" : "删除词条")
+                    .help(isClipboardEntry ? L10n.text("移除剪贴板记录") : L10n.text("删除词条"))
+                    .accessibilityLabel(isClipboardEntry ? L10n.text("移除剪贴板记录") : L10n.text("删除词条"))
                 }
             }
         }
         .accessibilityElement(children: .contain)
         .accessibilityLabel(
-            model.source == .clipboard ? "剪贴板操作"
-                : model.isTimelineVisible ? "时间线操作" : "词条操作"
+            model.source == .clipboard ? L10n.text("剪贴板操作")
+                : model.isTimelineVisible ? L10n.text("时间线操作") : L10n.text("词条操作")
         )
     }
 
@@ -1672,14 +1672,14 @@ private struct GalaxyView: View {
         do {
             guard let clip = try watcher.promote(entry) else { return }
             promotedIDs.insert(entry.id)
-            ToastController.shared.show(clip.count > 1 ? "已入库（第 \(clip.count) 次）" : "已收入词库")
+            ToastController.shared.show(clip.count > 1 ? L10n.format("已入库（第 %d 次）", clip.count) : L10n.text("已收入词库"))
         } catch {
-            ToastController.shared.show("入库失败：\(error.localizedDescription)")
+            ToastController.shared.show(L10n.format("入库失败：%@", error.localizedDescription))
         }
     }
 
     private func timelineSource(for event: ClipEvent) -> String {
-        let appName = event.appName ?? "未知来源"
+        let appName = event.appName ?? L10n.text("未知来源")
         guard let urlString = event.url,
               let host = URL(string: urlString)?.host else {
             return appName

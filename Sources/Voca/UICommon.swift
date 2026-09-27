@@ -19,6 +19,76 @@
 import AppKit
 import SwiftUI
 
+/// An in-app override; the default preserves macOS's per-app language setting.
+enum DisplayLanguage: String {
+    case system, english, simplifiedChinese
+
+    static let preferenceKey = "displayLanguage"
+
+    var locale: Locale? {
+        switch self {
+        case .system: nil
+        case .english: Locale(identifier: "en")
+        case .simplifiedChinese: Locale(identifier: "zh-Hans")
+        }
+    }
+
+    var resourceName: String? {
+        switch self {
+        case .system: nil
+        case .english: "en"
+        case .simplifiedChinese: "zh-Hans"
+        }
+    }
+}
+
+/// Installed on every SwiftUI root, including AppKit-hosted windows and popups.
+struct DisplayLanguageView<Content: View>: View {
+    @AppStorage(DisplayLanguage.preferenceKey) private var language = DisplayLanguage.system.rawValue
+    let content: Content
+
+    var body: some View {
+        if let locale = (DisplayLanguage(rawValue: language) ?? .system).locale {
+            content.environment(\.locale, locale)
+        } else {
+            content
+        }
+    }
+}
+
+/// Localizes strings constructed outside SwiftUI's literal-based view initializers.
+enum L10n {
+    static let resourceBundle = Bundle.module
+
+    private static let explicitBundles: [String: Bundle] = {
+        var result: [String: Bundle] = [:]
+        for language in ["en", "zh-Hans"] {
+            if let path = resourceBundle.path(forResource: language, ofType: "lproj"),
+               let bundle = Bundle(path: path) {
+                result[language] = bundle
+            }
+        }
+        return result
+    }()
+
+    static func text(_ key: String, language: DisplayLanguage? = nil) -> String {
+        let selection = language ?? DisplayLanguage(
+            rawValue: UserDefaults.standard.string(forKey: DisplayLanguage.preferenceKey) ?? ""
+        ) ?? .system
+        let bundle = selection.resourceName.flatMap { explicitBundles[$0] } ?? resourceBundle
+        return bundle.localizedString(forKey: key, value: key, table: nil)
+    }
+
+    static func format(_ key: String, _ arguments: CVarArg...) -> String {
+        let template = text(key)
+        let selection = DisplayLanguage(
+            rawValue: UserDefaults.standard.string(forKey: DisplayLanguage.preferenceKey) ?? ""
+        ) ?? .system
+        let locale = selection.locale ?? Locale.autoupdatingCurrent
+        return String(format: template, locale: locale, arguments: arguments)
+    }
+}
+
 /// 跨界面共享的界面常量与基础控件。
 ///
 /// 词库/剪贴板列表、查词浮窗与词条卡、星图三类表面此前各自维护字号派生、
@@ -94,7 +164,7 @@ enum SourceAppIcon {
     static func label(name: String?, bundleID: String?, size: CGFloat = 14) -> some View {
         HStack(spacing: 5) {
             iconImage(bundleID: bundleID, size: size)
-            Text(name ?? "未知来源")
+            Text(name ?? L10n.text("未知来源"))
         }
     }
 

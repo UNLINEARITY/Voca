@@ -154,7 +154,7 @@ final class WorkspaceNavigation: ObservableObject {
         )
         window.title = "Voca"
         window.identifier = NSUserInterfaceItemIdentifier("voca.workspace")
-        window.contentView = WorkspaceHostingView(rootView: content)
+        window.contentView = WorkspaceHostingView(rootView: DisplayLanguageView(content: content))
         window.isReleasedWhenClosed = false
         window.center()
         panelWindow = window

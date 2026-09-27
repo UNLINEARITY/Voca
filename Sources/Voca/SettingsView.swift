@@ -28,6 +28,7 @@ struct SettingsView: View {
     @State private var stats: LibraryInfo.Stats?
     @State private var databaseBytes: Int64 = 0
     @State private var confirmingClearLibrary = false
+    @AppStorage(DisplayLanguage.preferenceKey) private var displayLanguage = DisplayLanguage.system.rawValue
     @AppStorage("listFontSize") private var listFontSize = Typography.listDefault
     @AppStorage("popupFontSize") private var popupFontSize = Typography.popupDefault
     @AppStorage("galaxyChromeFontSize") private var galaxyChromeFontSize = 13.0
@@ -69,6 +70,12 @@ struct SettingsView: View {
 
     private var generalSection: some View {
         Section("通用") {
+            Picker("语言", selection: $displayLanguage) {
+                Text("跟随系统").tag(DisplayLanguage.system.rawValue)
+                Text("English").tag(DisplayLanguage.english.rawValue)
+                Text("简体中文").tag(DisplayLanguage.simplifiedChinese.rawValue)
+            }
+            .pickerStyle(.menu)
             SharedToggleRows()
         }
     }
@@ -120,7 +127,7 @@ struct SettingsView: View {
     ) -> some View {
         VStack(alignment: .leading, spacing: 4) {
             HStack {
-                Text(title)
+                Text(L10n.text(title))
                 Spacer()
                 Slider(value: value, in: range, step: 1)
                     .frame(width: 240)
@@ -129,7 +136,7 @@ struct SettingsView: View {
                     .foregroundStyle(.secondary)
                     .frame(width: 44, alignment: .trailing)
             }
-            Text(caption)
+            Text(L10n.text(caption))
                 .font(.caption)
                 .foregroundStyle(.secondary)
         }
@@ -219,7 +226,7 @@ struct SettingsView: View {
             }
             if let meta = DictionaryService.shared.meta {
                 LabeledContent("内嵌词典") {
-                    Text("\(meta.entries) 条 · \(meta.source)（\(meta.license)）")
+                    Text(L10n.format("%d 条 · %@（%@）", meta.entries, meta.source, meta.license))
                 }
                 LabeledContent("词典数据") {
                     if let url = URL(string: meta.sourceURL) {
@@ -254,13 +261,13 @@ struct SettingsView: View {
         panel.allowedContentTypes = [.plainText]
         let formatter = DateFormatter()
         formatter.dateFormat = "yyyyMMdd-HHmm"
-        panel.nameFieldStringValue = "Voca-导出-\(formatter.string(from: Date())).md"
+        panel.nameFieldStringValue = L10n.format("Voca-导出-%@.md", formatter.string(from: Date()))
         guard panel.runModal() == .OK, let url = panel.url else { return }
         do {
             try store.exportMarkdown().write(to: url, atomically: true, encoding: .utf8)
-            ToastController.shared.show("已导出：\(url.lastPathComponent)")
+            ToastController.shared.show(L10n.format("已导出：%@", url.lastPathComponent))
         } catch {
-            ToastController.shared.show("导出失败：\(error.localizedDescription)")
+            ToastController.shared.show(L10n.format("导出失败：%@", error.localizedDescription))
         }
     }
 
@@ -272,9 +279,9 @@ struct SettingsView: View {
         guard panel.runModal() == .OK, let url = panel.url else { return }
         do {
             try LibraryInfo.backup(databaseURL: databaseURL, to: url)
-            ToastController.shared.show("已备份：\(url.lastPathComponent)")
+            ToastController.shared.show(L10n.format("已备份：%@", url.lastPathComponent))
         } catch {
-            ToastController.shared.show("备份失败：\(error.localizedDescription)")
+            ToastController.shared.show(L10n.format("备份失败：%@", error.localizedDescription))
         }
     }
 
@@ -318,8 +325,8 @@ struct SharedToggleRows: View {
 /// 菜单栏面板与工作区设置页共用的快捷键录制行（标签与顺序只维护一处）
 struct SharedShortcutRows: View {
     var body: some View {
-        KeyboardShortcuts.Recorder("保存选中文字：", name: .saveSelection)
-        KeyboardShortcuts.Recorder("查词 / 翻译：", name: .lookupWord)
-        KeyboardShortcuts.Recorder("打开工作区：", name: .openGalaxy)
+        KeyboardShortcuts.Recorder(L10n.text("保存选中文字："), name: .saveSelection)
+        KeyboardShortcuts.Recorder(L10n.text("查词 / 翻译："), name: .lookupWord)
+        KeyboardShortcuts.Recorder(L10n.text("打开工作区："), name: .openGalaxy)
     }
 }

@@ -293,7 +293,7 @@ final class ClipboardWatcher: ObservableObject {
         guard pasteboard.setString(text, forType: .string) else { return }
         // 同步基准：下一次轮询视为“无变化”，不产生新记录
         lastChangeCount = pasteboard.changeCount
-        ToastController.shared.show("已复制")
+        ToastController.shared.show(L10n.text("已复制"))
     }
 
     /// 把历史条目写回剪贴板（文本或图片；不计入历史）
@@ -314,7 +314,7 @@ final class ClipboardWatcher: ObservableObject {
                 guard let self, self.entries.contains(where: { $0.id == entry.id }),
                       NSPasteboard.general.changeCount == changeCountAtClick else { return }
                 guard let image else {
-                    ToastController.shared.show("图片读取失败")
+                    ToastController.shared.show(L10n.text("图片读取失败"))
                     return
                 }
                 self.writeImageToPasteboard(type: .init(image.type), data: image.data)
@@ -325,11 +325,11 @@ final class ClipboardWatcher: ObservableObject {
     private func writeImageToPasteboard(type: NSPasteboard.PasteboardType, data: Data) {
         let pasteboard = NSPasteboard.general
         guard Self.writeImage(type: type, data: data, on: pasteboard) else {
-            ToastController.shared.show("图片复制失败")
+            ToastController.shared.show(L10n.text("图片复制失败"))
             return
         }
         lastChangeCount = pasteboard.changeCount
-        ToastController.shared.show("已复制")
+        ToastController.shared.show(L10n.text("已复制"))
     }
 
     @discardableResult
@@ -355,12 +355,12 @@ struct ClipboardHistoryView: View {
             Group {
                 if watcher.entries.isEmpty {
                     ContentUnavailableView(
-                        watcher.isEnabled ? "暂无剪贴板记录" : "剪贴板记录已关闭",
+                        watcher.isEnabled ? L10n.text("暂无剪贴板记录") : L10n.text("剪贴板记录已关闭"),
                         systemImage: "clipboard",
                         description: Text(
                             watcher.isEnabled
-                                ? "复制的内容会出现在这里；点行尾的加号按钮可收入词库。"
-                                : "可在菜单栏 Voca 图标或设置页中开启。"
+                                ? L10n.text("复制的内容会出现在这里；点行尾的加号按钮可收入词库。")
+                                : L10n.text("可在菜单栏 Voca 图标或设置页中开启。")
                         )
                     )
                 } else {
@@ -435,7 +435,7 @@ struct ClipboardHistoryView: View {
                         Image(systemName: expanded ? "chevron.up" : "chevron.down")
                     }
                     .buttonStyle(.borderless)
-                    .help(expanded ? "收起" : "展开全文")
+                    .help(expanded ? L10n.text("收起") : L10n.text("展开全文"))
                 }
                 if entry.isText || entry.isImage {
                     Button {
@@ -444,7 +444,7 @@ struct ClipboardHistoryView: View {
                         Image(systemName: "doc.on.doc")
                     }
                     .buttonStyle(.borderless)
-                    .help(entry.isImage ? "复制图片" : "复制全文")
+                    .help(entry.isImage ? L10n.text("复制图片") : L10n.text("复制全文"))
                 }
                 if entry.isText {
                     let promoted = promotedIDs.contains(entry.id)
@@ -456,7 +456,7 @@ struct ClipboardHistoryView: View {
                     }
                     .buttonStyle(.borderless)
                     .disabled(promoted)
-                    .help(promoted ? "已入库" : "收入词库")
+                    .help(promoted ? L10n.text("已入库") : L10n.text("收入词库"))
                 }
                 Button {
                     deletingEntry = entry
@@ -495,7 +495,7 @@ struct ClipboardHistoryView: View {
                 )
         } else if let files = entry.fileNames {
             Label(
-                files.count == 1 ? files[0] : "\(files.count) 个文件",
+                files.count == 1 ? files[0] : L10n.format("%d 个文件", files.count),
                 systemImage: "doc.on.doc.fill"
             )
             .font(.system(size: listFontSize))
@@ -533,7 +533,7 @@ struct ClipboardHistoryView: View {
         let calendar = Calendar.current
         let time = date.formatted(date: .omitted, time: .shortened)
         if calendar.isDateInToday(date) { return time }
-        if calendar.isDateInYesterday(date) { return "昨天 " + time }
+        if calendar.isDateInYesterday(date) { return L10n.format("昨天 %@", time) }
         return date.formatted(date: .abbreviated, time: .shortened)
     }
 
@@ -555,10 +555,10 @@ struct ClipboardHistoryView: View {
         do {
             // 入库时间 = 复制时间；同文本合并计数；入库后保留剪贴板记录
             guard let clip = try watcher.promote(entry) else { return }
-            ToastController.shared.show(clip.count > 1 ? "已入库（第 \(clip.count) 次）" : "已收入词库")
+            ToastController.shared.show(clip.count > 1 ? L10n.format("已入库（第 %d 次）", clip.count) : L10n.text("已收入词库"))
             promotedIDs.insert(entry.id)
         } catch {
-            ToastController.shared.show("入库失败：\(error.localizedDescription)")
+            ToastController.shared.show(L10n.format("入库失败：%@", error.localizedDescription))
         }
     }
 }

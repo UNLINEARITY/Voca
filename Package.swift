@@ -3,6 +3,7 @@ import PackageDescription
 
 let package = Package(
     name: "Voca",
+    defaultLocalization: "en",
     platforms: [
         .macOS("26.0")
     ],
@@ -21,6 +22,8 @@ let package = Package(
             resources: [
                 // 内嵌只读词典（scripts/make_dictionary.py 生成）
                 .copy("Resources/dictionary.sqlite"),
+                .process("Resources/en.lproj"),
+                .process("Resources/zh-Hans.lproj"),
             ]
         ),
         .testTarget(

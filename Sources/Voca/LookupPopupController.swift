@@ -130,11 +130,11 @@ final class LookupPopupController: NSObject {
     private func show(content: LookupContent, allowSave: Bool) {
         self.content = content
         let hostView = NSHostingView(
-            rootView: LookupPopupView(
+            rootView: DisplayLanguageView(content: LookupPopupView(
                 content: content,
                 allowSave: allowSave,
                 onSave: { [weak self] note in self?.saveToLibrary(note: note) }
-            )
+            ))
         )
         hostView.autoresizingMask = [.width, .height]
 
@@ -274,7 +274,7 @@ final class LookupPopupController: NSObject {
                 note: (trimmedNote?.isEmpty ?? true) ? nil : trimmedNote
             )
         } catch {
-            ToastController.shared.show("保存失败：\(error.localizedDescription)")
+            ToastController.shared.show(L10n.format("保存失败：%@", error.localizedDescription))
         }
     }
 }
@@ -324,7 +324,7 @@ private struct LookupPopupView: View {
                         onSave(translationResult)
                     } label: {
                         Label(
-                            saved ? "已入库" : "收入词库",
+                            saved ? L10n.text("已入库") : L10n.text("收入词库"),
                             systemImage: saved ? "checkmark.circle.fill" : "plus.circle"
                         )
                         .font(.system(size: popupFontSize))
@@ -350,13 +350,13 @@ private struct LookupPopupView: View {
                             SpeechService.shared.speak(englishText, accent: accent)
                         } label: {
                             Label(
-                                accent == .british ? "英" : "美",
+                                accent == .british ? L10n.text("英") : L10n.text("美"),
                                 systemImage: "speaker.wave.2"
                             )
                             .font(.system(size: popupFontSize))
                         }
                         .buttonStyle(.borderless)
-                        .help(accent == .british ? "英音朗读" : "美音朗读")
+                        .help(accent == .british ? L10n.text("英音朗读") : L10n.text("美音朗读"))
                     }
                     Spacer()
                 }

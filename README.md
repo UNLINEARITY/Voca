@@ -1,116 +1,91 @@
-# Voca — macOS 全局划词保存
+# Voca — save selected text on macOS
 
-菜单栏小工具：在任意 App 里**选中文字 → 按快捷键 → 静默保存**，右下角轻提示确认。数据全部本地存储在单个 SQLite 文件里。
+[English](README.md) · [简体中文](README.zh-CN.md)
 
-## 快速开始
+Voca is an open-source, local-first macOS menu bar app for saving selected text. Select text in another app, press a shortcut, and Voca quietly adds it to your library. Look up words, translate phrases, revisit what you saved in a fullscreen word galaxy, or keep a separate clipboard history. Your library stays on your Mac in SQLite.
 
-系统要求：**macOS 26 或更高版本**。
+## Requirements and build
 
-```bash
-./build.sh          # 编译并组装 build/Voca.app
-open build/Voca.app # 启动（菜单栏会出现 Voca 球体图标）
-```
-
-## 首次使用：授权辅助功能（只需一次，必须手工）
-
-1. 启动 Voca 后，随便在 Safari/备忘录里选中一段文字，按 **⌥⇧S**（默认快捷键）
-2. 系统会弹出辅助功能授权提示 → 点「打开系统设置」
-3. **系统设置 → 隐私与安全性 → 辅助功能** → 点 **＋** → 选择 `build/Voca.app` → 打开开关
-4. 回到任意 App，选中文字再按快捷键 → 右下角出现「已保存 · 来自 XXX」
-
-> 如果列表里已有 Voca 但开关是关的，直接打开开关即可。
-
-## 日常使用
-
-| 操作 | 方式 |
-|---|---|
-| 保存选中文字 | 选中 → `⌥⇧S`（可在菜单栏 Voca 图标或设置页里改键） |
-| 三指下滑保存（实验性） | 菜单栏打开开关后，在任意 App 选中文字 → 触控板三指向下滑动并抬起；仍走与快捷键相同的保存流程 |
-| 查看全部记录 | 菜单栏 Voca 图标 → 词库；与剪贴板历史、设置共用一个可调整大小的三标签窗口（词库页支持全文搜索） |
-| 查词与翻译 | 选中 → `⌥⇧D`（可改），或右键 → 服务 → 用 Voca 查词；光标旁弹非激活浮窗：单词/短语/缩写/专业术语（约 61 万词条，含词形变体与 [计] 领域术语）显示词典卡，词典未命中的句子/短语自动走系统离线翻译（英↔中双向，首次使用系统会提示下载语言包）；点「收入词库」入库，译文自动写入备注；点浮窗外部或按 ESC 关闭；纯数字/超长选中静默忽略 |
-| 编辑记录 | 记录行 ✏️ 按钮：修改文本、添加备注（⌘↩ 保存）；备注在列表中浅灰显示、行数不截断 |
-| 双击查词 | 词库列表或星图（词库/剪贴板档）中双击词条：单词/短语显示词典卡（音标、中英释义、标签、英/美发音按钮），句子或未命中内容自动走系统翻译（英↔中）；纯查看，不改动词条。词典卡还带学习增强：词根拆解（直接标注优先，无标注时按词缀边界智能拆解，可在设置关闭）、词形家族、相关短语与英英同义词。释义区超长时内部滚动，浮窗不抢焦点、点外部即消散，宽度可在设置→外观调节（360–560pt，词根拆解带角色色徽章） |
-| 展开长文本 | 列表行 ⌄ 按钮展开/收起全文（仅当文本确实超出 5 行时出现） |
-| 时间线 | 记录行 🕐 按钮：查看该内容的每次保存时间与来源；重复保存自动合并计数（×N）并置顶 |
-| 导出 Markdown | 记录窗口工具栏 ⬇ 按钮：裸条目导出（每条一行、条目间空行、最近保存倒序；有备注的条目下一行以 > 引用附注） |
-
-| 剪贴板历史 | 菜单栏 Voca 图标 → 剪贴板历史；复制的文本自动暂存，点 ➕ 收入词库 |
-| 工作区快捷键 | `⌥⇧V`（可改）再次打开最近停留的界面：设置、词库列表、剪贴板列表或星图；当前界面已激活时按键可收起。切换标签或在星图与列表间移动后会记住位置，重启后仍生效 |
-| 星图 | 菜单栏「星图」可直接进入星图：检索、词库和剪贴板三档；从列表窗口进入时使用当前标签对应的星图。剪贴板星图只显示文字，图片和文件仍在列表查看 |
-| 设置页 | 工作区左起第一个标签：通用开关（Dock 图标、剪贴板历史、三指下滑）、界面字号（列表/浮窗两档滑杆，11–18pt）、保存/查词/工作区三个快捷键录制、词库统计与导出/清空、数据库位置/占用/在 Finder 显示/一键快照备份，以及版本与内嵌词典信息；与菜单栏设置项双入口共存 |
-| 双层导航 | 星图按 ⇧⌥↑ 进入对应列表（检索进入设置页），或点星图顶栏的「返回面板」；列表按 ⇧⌥↓ 返回该标签星图（设置页进入检索星图）；⇧⌥←/→ 在 设置↔词库↔剪贴板 标签或星图档位之间循环。搜索、编辑和弹窗期间方向键优先用于当前控件 |
-| 复制某条记录 | 记录行的 📄 按钮，或右键 → 复制全文 |
-| 删除某条记录 | 记录行的 🗑 按钮，或右键 → 删除 |
-| 修改快捷键 | 菜单栏 Voca 图标或设置页的「保存选中文字 / 查词 · 翻译 / 打开工作区」录制器，直接按新键位（两处共用同一份设置） |
-| 退出 | 菜单栏 Voca 图标 → 退出 Voca |
-
-删除操作（单条/清空）均有二次确认。星图仍支持桌面折射、球面文字、拖拽旋转、缩放字号、调参、词条详情与时间线；屏幕画面只在内存中处理，录屏不可用时保留原生玻璃球后备显示。双层切换使用玻璃外壳过渡；系统开启“减弱动态效果”时改为简短淡入淡出。
-
-保存成功时，右下角提示内的短光线缓缓收入 V 球；不显示选中文字。“减弱动态效果”下改为简短淡入，不影响静默保存。
-
-三指手势默认关闭，依赖 macOS 未公开的 MultitouchSupport 接口，系统更新后可能失效。支持内建及外接 Apple 触控板；外接设备重连后会自动检查。若系统的“三指下滑打开 App Exposé”与之冲突，请自行到「系统设置 → 触控板 → 更多手势」将 App Exposé 改为四指或关闭；Voca 不修改系统设置。菜单栏会显示触控板是否就绪，接口不可用时 `⌥⇧S` 仍能照常保存。手势只在三指向下移动足够距离并全部抬起后触发一次；不保存触摸轨迹。
-
-首次使用右键服务：在任意 App 选中文本右键如果没看到「用 Voca 查词」，到**系统设置 → 键盘 → 键盘快捷键… → 服务 → 文本**里勾选启用（还可以在这里给它单独配快捷键）。Electron 类应用（如 VS Code）的右键菜单默认不带服务子菜单，用 `⌥⇧D` 即可。
-
-## 数据在你手上
-
-- **位置**：`~/Library/Application Support/Voca/voca.sqlite`（单文件）
-- **备份**：拷贝这一个文件即可
-- **查看**：任何 SQLite 工具都能直接打开（如 `sqlite3`、DB Browser for SQLite）
-- **结构**：`clips` 表（正式词库，含 count/lastSeenAt 合并计数）+ `clip_events` 表（每次保存的时间线事件）+ `clipboard_entries` 表（剪贴板文本历史）+ `clipboard_images` 表（图片原始数据；两类历史均无上限保留，启动合计载入最近 2000 条，可在历史页清空）
-- **词典与翻译**：释义来自应用内嵌的只读词典（约 61 万词条：单词、短语、缩写与领域术语，含词形变体），不联网、不写入你的词库；数据源为 [ECDICT](https://github.com/skywind3000/ECDICT)（MIT License，词根词缀表同源）与 [Moby Thesaurus II](https://www.gutenberg.org/ebooks/3202)（Grady Ward，公有领域，英英同义词），由 `scripts/make_dictionary.py` 生成。句子/未命中短语的翻译使用 macOS 系统翻译（Translation 框架，设备端离线，英↔中双向）；发音使用 macOS 系统离线语音
-
-## 工作原理
-
-```
-选中文字 → 全局快捷键或已开启的三指下滑手势
-  ├─ 主路径：Accessibility API 读选区（kAXSelectedTextAttribute）
-  ├─ 降级路径：模拟 ⌘C 读剪贴板（读完自动恢复你原来的剪贴板）
-  ├─ 密码框（AXSecureTextField）自动跳过
-  └─ 3 秒内同文本同来源不重复入库
-→ 写入本地 SQLite（同文本合并：计数 +1 并置顶，时间线记一笔）→ 右下角 toast 确认
-```
-
-**来源网页（URL 溯源）**：前台是 Safari / Chrome / Edge / Brave / Arc / Vivaldi / Opera 时，保存与剪贴板记录都会自动带上当前标签页 URL，记录行、时间线、剪贴板历史均可点 🔗 回源。首次使用每个浏览器会弹一次「控制 XX」的自动化授权，同意后记住；拒绝则照常保存但无 URL。Firefox 未暴露标签页接口，仅记录 App 名。
-
-### 剪贴板历史（默认开启，可在菜单栏 Voca 图标关闭）
-
-- 每 0.5 秒轮询剪贴板变化；**文本条目无上限持久化在 `clipboard_entries` 表（启动载入最近 2000 条）**，重启不丢
-- 图片按原始图片格式写入本地 SQLite，可在重启后预览并通过复制按钮写回系统剪贴板；图片附带文字时优先记录图片；图片不可收入文字词库
-- 文件复制也会显示（仅本次会话，退出即清，不可入库）；图片不自动清理，可手动删除或清空历史
-- 密码管理器标记的保密条目（ConcealedType）自动跳过；重复内容各记一条（不去重）
-- **手动点 ➕ 才进入词库**，入库后记录仍保留在历史中，入库时间 = 复制时间；划词取词模拟 ⌘C 期间自动暂停监听，不污染历史
-
-## 排障
-
-| 症状 | 处理 |
-|---|---|
-| toast 提示「需要辅助功能权限」 | 按上文授权步骤操作；改过代码后需重新授权新构建的 App |
-| 「未检测到选中文本」 | 该 App 可能不支持 AX 取词且剪贴板策略也失败（部分游戏/远程桌面）；可手动 ⌘C 后到记录窗口手动粘贴（v0.2 计划加入剪贴板兜底入口） |
-| 首次从浏览器保存弹出「控制 Safari / Chrome」授权 | 每个浏览器仅一次；同意后记住，拒绝则该来源无 URL 但保存不受影响 |
-| 快捷键没反应 | 可能与其他软件（Easydict/Bob 等）键位冲突，到菜单栏改键 |
-| 三指下滑没反应 | 先确认菜单栏实验性开关已开、显示触控板就绪；检查系统 App Exposé 三指手势是否冲突。该功能依赖未公开接口，系统更新后可能不可用；可继续用保存快捷键 |
-| 重启 Mac 后要重新打开 | 系统设置 → 通用 → 登录项 → ＋ 添加 Voca.app |
-| 想彻底重置 | 退出 Voca，删除 `~/Library/Application Support/Voca/` 目录，重新打开 |
-
-## 已知限制（MVP 范围）
-
-- 不记录浏览器 URL / 窗口标题（只记来源 App 名）——避免额外权限弹窗
-- ⌘C 降级路径会短暂触碰剪贴板（约 0.35 秒后自动恢复，期间剪贴板监听自动暂停）
-- 数据即标准 SQLite 文件，同时提供 Markdown 一键导出
-- 无开机自启设置——用系统「登录项」管理
-
-## 许可
-
-本项目以 [AGPL-3.0-or-later](LICENSE) 发布，© 2026 [UNLINEARITY](https://github.com/UNLINEARITY)。
-
-依赖 [GRDB](https://github.com/groue/GRDB.swift) 与 [KeyboardShortcuts](https://github.com/sindresorhus/KeyboardShortcuts) 均为 MIT 许可，与 AGPL 兼容。
-
-## 开发
+- macOS 26 or later; a Mac with a trackpad is needed only for the optional gesture.
+- Swift toolchain capable of building the Swift 5.9 package.
 
 ```bash
-swift build          # 调试编译
-./build.sh           # release 编译 + 组装 .app
+swift build          # Development build
+./build.sh           # Release build, signed app bundle at build/Voca.app
+open build/Voca.app  # Launch the menu bar app
 ```
 
-依赖：[GRDB](https://github.com/groue/GRDB.swift)（SQLite）、[KeyboardShortcuts](https://github.com/sindresorhus/KeyboardShortcuts)（全局快捷键）。
+The build script packages the embedded dictionary and dependency resources, signs the app (using the local “Voca Development” identity when available, otherwise ad-hoc), and verifies the signature. An ad-hoc signature may not preserve previously granted macOS privacy permissions across builds. The app currently has no installer or automatic updater.
+
+## First run
+
+1. Open Voca and select text in Safari, Notes, or another app.
+2. Press **⌥⇧S** to save it. When macOS requests Accessibility access, open **System Settings → Privacy & Security → Accessibility**, add `build/Voca.app`, and enable it. The permission must be granted manually.
+3. Select text again and press the shortcut. Voca saves silently and shows only a small confirmation toast at the bottom right; it never shows the selected text in the toast.
+
+The app follows your macOS language preference by default: Simplified Chinese is supported, and English is the fallback. To override it, choose **Settings → General → Language → English / Simplified Chinese**; select **Follow system** to return to the macOS language. System permission dialogs and the macOS Services menu continue to follow macOS's own language setting.
+
+## Everyday use
+
+| Feature | How it works |
+|---|---|
+| Save selected text | Select text in any app and press **⌥⇧S** (customizable). Voca tries Accessibility first, then a temporary copy-and-restore fallback. Secure text fields are skipped. |
+| Look up or translate | Select text and press **⌥⇧D**, or use the macOS text service **Look Up with Voca**. A cursor-side popup shows dictionary entries for words and supported phrases; unmatched text can use Apple's on-device English↔Chinese translation. The popup can save the selection and its translation as a note. |
+| Open the workspace | Press **⌥⇧V** (customizable) or use the menu bar. The resizable workspace has Settings, Library, and Clipboard tabs, and remembers the last location. |
+| Browse the library | Search the full text, expand long entries, edit text or notes, copy, delete, or open a saved source URL. Saving identical text again merges it, increments its count, and adds an event to its timeline. |
+| Clipboard history | When enabled, copied text and images appear in a separate history. Files appear for the current session only. Click **+** on a text entry to add it to the library; history is never silently merged into the library. |
+| Word galaxy | Open the fullscreen galaxy from the menu bar or workspace. Explore library, clipboard text, or search results; rotate the sphere, open item details, and return to the workspace. A native fallback remains usable without screen capture. |
+| Optional three-finger gesture | Enable the experimental gesture in the menu bar or Settings, then swipe down with three fingers on an Apple trackpad to save selected text. The keyboard shortcut remains available. |
+
+Double-clicking a word or phrase in a library list or galaxy opens a read-only lookup popup. The embedded English→Chinese dictionary includes pronunciation, learning annotations, word families, related phrases, and synonyms where available; British and American speech buttons use system voices. Popup width, reading area height, and text sizes can be adjusted in Settings. The lookup language pair is English↔Chinese; the app's display language does not change the dictionary's underlying content.
+
+### Navigation and shortcuts
+
+- **⇧⌥← / ⇧⌥→**: cycle workspace tabs or galaxy modes when an editor or dialog is not handling the keys.
+- **⇧⌥↓**: enter the galaxy for the current tab. **⇧⌥↑**: return to its workspace tab.
+- **Esc**: close the lookup popup or leave the galaxy.
+- The three global shortcuts (save, lookup, workspace) can be changed in the menu bar or Settings.
+
+All single-entry and clear-library/history actions require a scope-specific confirmation. Markdown export writes entries in recency order, with notes as blockquotes separated by blank lines; it does not export source URLs.
+
+## Permissions and privacy
+
+- **Accessibility** is required to read selected text and to use the copy fallback. Voca does not read secure text fields. The fallback accepts clipboard contents only after a pasteboard change and restores the prior contents; simulated copies do not enter history.
+- **Automation (Apple Events)** may be requested separately for Safari or a supported Chromium browser to read the current tab URL. If denied or unavailable, text is still saved without a URL. Firefox does not expose a supported tab URL path.
+- **Screen Recording** may be requested for the galaxy's live desktop refraction. Captured frames are processed in memory and not saved. The galaxy still works when permission or display capture is unavailable.
+- Clipboard monitoring is optional. Entries marked as concealed by a password manager are skipped. Voca-initiated copy-back does not re-enter history.
+- Lookup uses a bundled, read-only dictionary; translation and speech use macOS system capabilities. Apple may prompt to download the language packs required for on-device translation. Voca does not require an account or cloud service.
+
+The three-finger gesture is **off by default** and uses an undocumented macOS MultitouchSupport interface. It may stop working after a system update. If it conflicts with App Exposé, change that gesture in **System Settings → Trackpad → More Gestures**; Voca will not change your system settings.
+
+## Your data
+
+The library database is at `~/Library/Application Support/Voca/voca.sqlite`. Its saved-text library (`clips` and `clip_events`) is distinct from clipboard history (`clipboard_entries` and stored images). Text and image history are persisted without automatic deduplication or a retention cap; the workspace initially loads a recent window. Copied files are session-only.
+
+Use **Settings → Database → Back Up** for a safe, compact SQLite snapshot while Voca is running. You can also inspect the database with a SQLite client. For a full manual reset, quit Voca before deleting `~/Library/Application Support/Voca/` — this permanently removes your data.
+
+The bundled English→Chinese dictionary is generated by `scripts/make_dictionary.py` from [ECDICT](https://github.com/skywind3000/ECDICT) (MIT; including its root data) and [Moby Thesaurus II](https://www.gutenberg.org/ebooks/3202) (public domain). It does not modify your library.
+
+## Troubleshooting
+
+| Problem | What to try |
+|---|---|
+| Nothing is saved | Check Accessibility access for the **newly built** `Voca.app`. Some apps do not expose a selection or permit a simulated copy. |
+| The shortcut does nothing | Check for a conflict with another app and record a different shortcut in Settings. |
+| A browser URL is missing | Allow Automation for that browser if prompted. Capturing the text itself does not depend on URL access. |
+| The right-click lookup service is missing | Enable Voca under **System Settings → Keyboard → Keyboard Shortcuts → Services → Text**. Some Electron apps do not show the Services submenu; use **⌥⇧D** instead. |
+| The trackpad swipe is unavailable | Enable the experimental setting, check that the trackpad is connected, and check for an App Exposé conflict. Use **⌥⇧S** as a fallback. |
+| The galaxy has no desktop refraction | Check Screen Recording permission. The native galaxy remains usable without it. |
+| Voca does not start at login | Add `Voca.app` in **System Settings → General → Login Items**. |
+
+## Development and license
+
+```bash
+swift build
+swift test
+./build.sh
+```
+
+The Swift package uses [GRDB](https://github.com/groue/GRDB.swift) for SQLite and [KeyboardShortcuts](https://github.com/sindresorhus/KeyboardShortcuts) for configurable global shortcuts (both MIT-licensed). New source files must retain the project's AGPL header. See [AGENTS.md](AGENTS.md) for contribution and safety requirements.
+
+Voca is licensed under [AGPL-3.0-or-later](LICENSE). © 2026 [UNLINEARITY](https://github.com/UNLINEARITY).

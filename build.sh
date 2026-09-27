@@ -22,6 +22,18 @@ for bundle in .build/release/*.bundle; do
     cp -R "$bundle" "$APP/Contents/Resources/"
 done
 
+# SwiftUI resolves unqualified Text/Label keys in the app bundle, not the SPM resource bundle.
+# Keep the app's localizations beside the packaged dependency bundles.
+for language in en zh-Hans; do
+    mkdir -p "$APP/Contents/Resources/$language.lproj"
+    cp "Sources/Voca/Resources/$language.lproj/Localizable.strings" \
+        "$APP/Contents/Resources/$language.lproj/Localizable.strings"
+    cp "Sources/Voca/Resources/$language.lproj/InfoPlist.strings" \
+        "$APP/Contents/Resources/$language.lproj/InfoPlist.strings"
+    cp "Sources/Voca/Resources/$language.lproj/ServicesMenu.strings" \
+        "$APP/Contents/Resources/$language.lproj/ServicesMenu.strings"
+done
+
 # 从设计源图生成 macOS 所需的多尺寸图标。
 ICON_SOURCE="Assets/AppIcon.png"
 ICONSET="$APP/Contents/Resources/Voca.iconset"
@@ -39,6 +51,10 @@ cat > "$APP/Contents/Info.plist" <<'EOF'
 <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
 <plist version="1.0">
 <dict>
+    <key>CFBundleDevelopmentRegion</key>
+    <string>en</string>
+    <key>CFBundleLocalizations</key>
+    <array><string>en</string><string>zh-Hans</string></array>
     <key>CFBundleName</key>
     <string>Voca</string>
     <key>CFBundleDisplayName</key>
@@ -60,16 +76,16 @@ cat > "$APP/Contents/Info.plist" <<'EOF'
     <key>LSUIElement</key>
     <true/>
     <key>NSAppleEventsUsageDescription</key>
-    <string>Voca 在保存来自浏览器的选中文字时，读取当前标签页网址作为来源记录。</string>
+    <string>Voca reads the current browser tab URL to record the source of selected text you save.</string>
     <key>NSScreenCaptureUsageDescription</key>
-    <string>Voca 仅在打开星图时读取当前屏幕，以实时呈现玻璃球的透镜折射；画面只在内存中处理，不会保存。</string>
+    <string>Voca reads the screen only while the galaxy is open to render live refraction. Frames are processed in memory, not saved.</string>
     <key>NSServices</key>
     <array>
         <dict>
             <key>NSMenuItem</key>
             <dict>
                 <key>default</key>
-                <string>用 Voca 查词</string>
+                <string>Look Up with Voca</string>
             </dict>
             <key>NSMessage</key>
             <string>lookupWordService</string>
@@ -82,7 +98,7 @@ cat > "$APP/Contents/Info.plist" <<'EOF'
             <key>NSUserData</key>
             <string>lookup</string>
             <key>NSServiceDescription</key>
-            <string>在光标旁弹出 Voca 词典释义与英/美发音</string>
+            <string>Look up selected text with Voca near the cursor</string>
         </dict>
     </array>
     <key>NSHumanReadableCopyright</key>
