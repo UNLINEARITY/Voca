@@ -38,7 +38,7 @@ A completed build must contain zero errors and zero warnings.
 | `Sources/Voca/Toast.swift` | Non-activating toast panel and save feedback animation |
 | `Sources/Voca/UICommon.swift` | Shared UI constants: typography derivation, corner radii, floating-surface modifier, list truncation probe |
 | `Sources/Voca/GalaxyView.swift` | Galaxy model, window, rendering, interaction |
-| `Sources/Voca/GalaxyDanmakuView.swift` | Search-tab fullscreen library danmaku: drift, query highlight, hover slowdown, select & lookup |
+| `Sources/Voca/GalaxyTimeWallView.swift` | Timeline tab static time wall: time-mapped layout, zoom/pan, date ticks, highlight & lookup |
 | `Sources/Voca/DictionaryService.swift` | Embedded read-only ECDICT lookup, word detection, display formatting |
 | `Sources/Voca/DictionaryCardView.swift` | Dictionary card for the lookup popup (phonetics, senses, tags, speak buttons) |
 | `Sources/Voca/SpeechService.swift` | Offline system TTS with per-accent best-voice selection |

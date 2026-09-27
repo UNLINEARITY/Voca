@@ -187,7 +187,6 @@ final class GalaxyModel: ObservableObject {
     @Published var selectedItem: GalaxyItem?
     /// 双击词条发出的编辑请求(GalaxyView 监听后弹出编辑面板;剪贴板条目无编辑界面,忽略)
     @Published var pendingEdit: GalaxyItem?
-    @Published var searchQuery = ""
     @Published var source: GalaxySource = GalaxySource(
         rawValue: UserDefaults.standard.string(forKey: "galaxyLastSource") ?? ""
     ) ?? .library {
@@ -210,6 +209,49 @@ final class GalaxyModel: ObservableObject {
 
     /// 调参面板开关：菜单栏「星图」菜单持有，会话内共享
     @Published var showTuning = false
+
+    /// 检索档时间词墙：时间轴缩放（1 = 默认视野）与水平平移（像素）
+    @Published var timeWallScale: Double = 1
+    @Published var timeWallOffset: Double = 0
+    /// 词墙内容实际边缘（含胶囊半宽，布局回写；平移边界用它计算）
+    var timeWallEdges: (min: CGFloat, max: CGFloat)?
+
+    func zoomTimeWall(by factor: Double, anchorX: Double?, canvasWidth: Double?) {
+        let old = timeWallScale
+        let new = min(max(old * factor, 1), TimeWallLayout.maxScale)
+        guard new != old else { return }
+        timeWallScale = new
+        // 以指针为锚缩放：保持锚点下的时刻不动
+        if let anchorX, let width = canvasWidth {
+            let center = width / 2
+            let ratio = new / old
+            timeWallOffset = (anchorX - center) * (1 - ratio) + timeWallOffset * ratio
+        }
+        clampTimeWallOffset(canvasWidth: canvasWidth)
+    }
+
+    func panTimeWall(by delta: Double, canvasWidth: Double?) {
+        timeWallOffset += delta
+        clampTimeWallOffset(canvasWidth: canvasWidth)
+    }
+
+    func resetTimeWall() {
+        timeWallScale = 1
+        timeWallOffset = 0
+    }
+
+    /// 平移边界：以实际内容边缘为准（含胶囊半宽，两侧各留 24pt）。
+    /// 正向平移看更旧（左端），负向看更新（右端）；内容不溢出时固定居中。
+    private func clampTimeWallOffset(canvasWidth: Double?) {
+        guard let width = canvasWidth, let edges = timeWallEdges else { return }
+        if edges.max - edges.min <= width - 48 {
+            timeWallOffset = 0
+            return
+        }
+        let lower = Double(width / 2 - 24 - edges.max)
+        let upper = Double(24 - width / 2 - edges.min)
+        timeWallOffset = min(max(timeWallOffset, lower), upper)
+    }
 
     func rebuild(from clips: [Clip], announceSampling: Bool = true) {
         let sampled: [Clip]
@@ -410,11 +452,7 @@ final class GalaxyWindowController {
         case .clipboard:
             model.rebuild(fromClipboard: AppModel.shared.clipboardWatcher.entries)
         case .search:
-            let term = model.searchQuery.trimmingCharacters(in: .whitespacesAndNewlines)
-            let clips = term.isEmpty ? [] : AppModel.shared.store.clips.filter {
-                $0.text.localizedCaseInsensitiveContains(term)
-            }
-            model.rebuild(from: clips, announceSampling: false)
+            model.rebuild(from: AppModel.shared.store.clips, announceSampling: false)
         }
         let screenFrame = NSScreen.main?.visibleFrame
             ?? NSRect(x: 0, y: 0, width: 1200, height: 800)
@@ -480,18 +518,27 @@ final class GalaxyWindowController {
                 self.model.turnTimelinePage(with: event)
                 return nil
             }
-            // 检索档弹幕：滚轮与触控板滚动、捏合都缩放文字，灵敏度与球体一致
-            if event.window === self.window, self.model.source == .search {
+            // 检索档时间词墙：双指左右滑动沿时间轴浏览，捏合缩放时间轴（指针为锚）。
+            // 无边框窗口的滚轮/捏合事件常不带 window 归属，改按指针位置判定
+            if self.model.source == .search,
+               event.type == .scrollWheel || event.type == .magnify,
+               self.window?.frame.contains(NSEvent.mouseLocation) == true {
                 switch event.type {
                 case .scrollWheel:
-                    guard event.momentumPhase == [], event.scrollingDeltaY != 0 else {
-                        return event
-                    }
-                    let sensitivity = event.hasPreciseScrollingDeltas ? 0.006 : 0.075
-                    self.model.zoom(by: exp(event.scrollingDeltaY * sensitivity))
+                    guard event.scrollingDeltaX != 0 else { return event }
+                    let width = self.window?.contentView?.bounds.width ?? 0
+                    // 自然滚动方向：内容跟随手指（含惯性阶段）
+                    self.model.panTimeWall(
+                        by: -Double(event.scrollingDeltaX), canvasWidth: width
+                    )
                     return nil
                 case .magnify:
-                    self.model.zoom(by: max(0.1, 1 + event.magnification * 1.2))
+                    let width = self.window?.contentView?.bounds.width ?? 0
+                    self.model.zoomTimeWall(
+                        by: max(0.1, 1 + event.magnification * 1.2),
+                        anchorX: event.locationInWindow.x,
+                        canvasWidth: width
+                    )
                     return nil
                 default:
                     break
@@ -549,7 +596,6 @@ private struct GalaxyView: View {
     @State private var promotedIDs: Set<UUID> = []
     @State private var timelineEvents: [ClipEvent] = []
     @State private var selectedTimelineIndex = 0
-    @State private var searchDetailsExpanded = false
 
     var body: some View {
         GeometryReader { geometry in
@@ -584,7 +630,7 @@ private struct GalaxyView: View {
 
         return ZStack {
             if model.source == .search {
-                searchLayout
+                timelineLayout(availableWidth: geometry.size.width)
             } else {
                 sphere(diameter: radius * 2)
                     .position(x: geometry.size.width / 2, y: geometry.size.height / 2)
@@ -628,9 +674,9 @@ private struct GalaxyView: View {
         return false
     }
 
-    /// 检索档的三块区域由布局分配真实尺寸；弹幕画布与点击范围仅在中间。
-    private var searchLayout: some View {
-        VStack(spacing: 0) {
+    /// 时间线档：全屏时间词墙；选中详情作为浮层盖在刻度之上（不挤压词墙布局）。
+    private func timelineLayout(availableWidth: CGFloat) -> some View {
+        ZStack(alignment: .bottom) {
             HStack(spacing: 0) {
                 if model.showTuning {
                     tuningPanel
@@ -644,28 +690,15 @@ private struct GalaxyView: View {
                 }
             }
 
-            VStack(spacing: 10) {
-                if hasEmptySearchResult {
-                    Text("没有匹配的词条")
-                        .font(.system(size: chromeSize(-1)))
-                        .foregroundStyle(.secondary)
-                }
-                if let item = model.selectedItem, case .library(let clip) = item.entry {
-                    searchSelectionBar(clip)
-                }
-                searchBar
-                    .onChange(of: model.searchQuery) { _, query in
-                        applySearchQuery(query)
-                    }
+            if model.selectedItem != nil {
+                selectionDetail(availableWidth: availableWidth)
+                    .padding(.horizontal, 20)
+                    .padding(.bottom, 8)
             }
-            .padding(.horizontal, 20)
-            .padding(.vertical, 14)
-            .frame(maxWidth: .infinity)
-            .background(.regularMaterial)
         }
     }
 
-    /// 仅将当前检索结果交给弹幕引擎；空查询仍展示整个词库。
+    /// 仅将当前检索结果交给时间词墙；空查询仍展示整个词库。
     @ViewBuilder
     private func searchDanmakuLayer(_ geometry: GeometryProxy) -> some View {
         if store.clips.isEmpty {
@@ -677,12 +710,10 @@ private struct GalaxyView: View {
             .frame(maxWidth: 480)
             .position(x: geometry.size.width / 2, y: geometry.size.height / 2)
         } else {
-            GalaxyDanmakuView(
+            GalaxyTimeWallView(
                 model: model,
-                clips: model.searchQuery.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
-                    ? store.clips : searchFilteredClips(),
+                clips: store.clips,
                 chromeBase: galaxyChromeFontSize,
-                reduceMotion: reduceMotion,
                 onSelect: { item in
                     withAnimation(selectionAnimation) {
                         model.selectedItem = item
@@ -695,13 +726,6 @@ private struct GalaxyView: View {
             .frame(width: geometry.size.width, height: geometry.size.height)
             .clipped()
         }
-    }
-
-    /// 检索档：输入了关键词但词库中无命中（弹幕保留环境流，仅提示）
-    private var hasEmptySearchResult: Bool {
-        let term = model.searchQuery.trimmingCharacters(in: .whitespacesAndNewlines)
-        guard !term.isEmpty, !store.clips.isEmpty else { return false }
-        return !store.clips.contains { $0.text.localizedCaseInsensitiveContains(term) }
     }
 
     private func handleDistributionChange() {
@@ -722,8 +746,7 @@ private struct GalaxyView: View {
         }
         switch source {
         case .search:
-            // 检索 = 词库检索视图:按当前关键词过滤词库
-            model.rebuild(from: searchFilteredClips(), announceSampling: false)
+            model.rebuild(from: AppModel.shared.store.clips, announceSampling: false)
         case .library:
             model.rebuild(from: store.clips)
         case .clipboard:
@@ -738,7 +761,6 @@ private struct GalaxyView: View {
     }
 
     private func handleSelectionChange() {
-        searchDetailsExpanded = false
         if let item = model.selectedItem, case .library(let clip) = item.entry {
             timelineEvents = store.events(for: clip)
         } else {
@@ -873,16 +895,14 @@ private struct GalaxyView: View {
                             ? L10n.text("星图还是空的")
                             : model.source == .clipboard
                                 ? L10n.text("暂无剪贴板文字")
-                                : model.searchQuery.isEmpty ? L10n.text("输入关键词检索") : L10n.text("没有匹配的词条"),
+                                : L10n.text("词库还是空的"),
                         systemImage: "sparkles",
                         description: Text(
                             model.source == .library
                                 ? L10n.text("保存一些文字后，它们会出现在这里。")
                                 : model.source == .clipboard
                                     ? L10n.text("复制文字后，它会出现在这里；图片和文件仍可在剪贴板历史中查看。")
-                                    : model.searchQuery.isEmpty
-                                        ? L10n.text("在下方输入关键词，球面会显示词库中匹配的词条。")
-                                        : L10n.text("换个关键词试试。")
+                                    : L10n.text("保存一些文字后，它们会出现在这里。")
                         )
                     )
                     .frame(maxWidth: diameter * 0.56)
@@ -898,7 +918,7 @@ private struct GalaxyView: View {
     // MARK: 顶部与提示
 
     /// 星图界面文字：设置页「星图界面字号」驱动，各元素按相对偏移派生
-    /// （顶栏/检索框/轨道卡值 +0，轨道卡标题 +2，注释卡 +1，提示条/页码 -1）
+    /// （轨道卡值 +0，轨道卡标题 +2，注释卡 +1，页码 -1）
     private func chromeSize(_ offset: Double = 0) -> CGFloat {
         Typography.derived(galaxyChromeFontSize, offset: offset)
     }
@@ -930,98 +950,6 @@ private struct GalaxyView: View {
             }
             selectionActions(item.entry)
         }
-    }
-
-    /// 检索模式:球下方的词库检索框;聚焦时方向键保留原生文本编辑行为
-    private func searchSelectionBar(_ clip: Clip) -> some View {
-        VStack(alignment: .leading, spacing: 8) {
-            HStack(spacing: 12) {
-                Text(clip.text)
-                    .font(.system(size: chromeSize(), weight: .medium))
-                    .lineLimit(1)
-                    .truncationMode(.middle)
-                    .frame(maxWidth: .infinity, alignment: .leading)
-
-                Button(searchDetailsExpanded ? L10n.text("收起详情") : L10n.text("查看详情")) {
-                    searchDetailsExpanded.toggle()
-                }
-                Button("复制") {
-                    watcher.copyText(clip.text)
-                }
-                Button("查词") {
-                    LookupPopupController.shared.handleViewOnly(clip.text)
-                }
-                Menu("更多", systemImage: "ellipsis") {
-                    Button("编辑") { editingClip = clip }
-                    if let urlString = clip.url, let url = URL(string: urlString) {
-                        Button("打开来源网页") { NSWorkspace.shared.open(url) }
-                    }
-                    Button("删除", role: .destructive) { deletingEntry = .library(clip) }
-                }
-                Button {
-                    model.selectedItem = nil
-                } label: {
-                    Image(systemName: "xmark")
-                }
-                .help("取消选择")
-                .accessibilityLabel("取消选择")
-            }
-            .buttonStyle(.bordered)
-
-            if searchDetailsExpanded {
-                ScrollView {
-                    VStack(alignment: .leading, spacing: 8) {
-                        Text(clip.text)
-                        if let note = clip.note, !note.isEmpty {
-                            Divider()
-                            Text(note).foregroundStyle(.secondary)
-                        }
-                    }
-                    .frame(maxWidth: .infinity, alignment: .leading)
-                    .textSelection(.enabled)
-                }
-                .frame(maxHeight: 160)
-            }
-        }
-        .padding(12)
-        .frame(maxWidth: 720)
-        .background(.quaternary, in: RoundedRectangle(cornerRadius: Radius.card))
-        .accessibilityElement(children: .contain)
-        .accessibilityLabel("选中词条")
-    }
-
-    private var searchBar: some View {
-        HStack(spacing: 8) {
-            Image(systemName: "magnifyingglass")
-            TextField("输入关键词，检索词库（回车开始）", text: $model.searchQuery)
-                .textFieldStyle(.plain)
-            if !model.searchQuery.isEmpty {
-                Button {
-                    model.searchQuery = ""
-                } label: {
-                    Image(systemName: "xmark.circle.fill")
-                        .foregroundStyle(.secondary)
-                }
-                .buttonStyle(.borderless)
-                .help("清空")
-            }
-        }
-        .font(.system(size: chromeSize()))
-        .padding(.horizontal, 14)
-        .padding(.vertical, 9)
-        .glassEffect(.regular, in: Capsule())
-        .frame(maxWidth: 340)
-    }
-
-    private func searchFilteredClips() -> [Clip] {
-        let term = model.searchQuery.trimmingCharacters(in: .whitespacesAndNewlines)
-        guard !term.isEmpty else { return [] }
-        return store.clips.filter { $0.text.localizedCaseInsensitiveContains(term) }
-    }
-
-    private func applySearchQuery(_ query: String) {
-        guard model.source == .search else { return }
-        model.rebuild(from: searchFilteredClips(), announceSampling: false)
     }
 
     private func noteBelowSphere(

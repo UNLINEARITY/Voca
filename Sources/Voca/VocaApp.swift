@@ -236,7 +236,7 @@ struct VocaApp: App {
         .menuBarExtraStyle(.window)
         .commands {
             CommandMenu("星图") {
-                Button("打开检索星图") {
+                Button("打开时间线星图") {
                     openGalaxyFromMenu(.search)
                 }
                 Button("打开词库星图") {
@@ -315,14 +315,14 @@ private struct HelpContentView: View {
             VStack(alignment: .leading, spacing: 14) {
                 helpSection("星图", items: [
                     "拖拽或双指滑动旋转球体",
-                    "⇧⌥←→ 切换检索 / 词库 / 剪贴板",
+                    "⇧⌥←→ 切换时间线 / 词库 / 剪贴板",
                     "⇧⌥↓ 进入星图 · ⇧⌥↑ 返回工作区",
                     "ESC 关闭查词浮窗或退出星图",
                 ])
-                helpSection("弹幕（检索档）", items: [
-                    "单击词条选中，底部显示操作栏",
-                    "双击词条打开查词浮窗",
-                    "滚轮 / 双指滚动缩放文字",
+                helpSection("时间线", items: [
+                    "词条按保存时间从旧到新横向排布",
+                    "拖动或双指左右滑动浏览 · 捏合缩放时间轴 · 双击空白复位",
+                    "单击词条显示详情与操作 · 双击词条打开查词浮窗",
                 ])
             }
             .padding(24)
