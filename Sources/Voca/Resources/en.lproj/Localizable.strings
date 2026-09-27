@@ -63,6 +63,10 @@
 "图片复制失败" = "Could not copy image";
 "图片读取失败" = "Could not read image";
 "在当前屏幕打开工作区" = "Open the workspace on the current screen";
+"时间线背景" = "Timeline background";
+"应用于星图轨道卡、注释卡与时间线词条；球面文字用「文字大小」调整" = "Applies to galaxy orbit and note cards and timeline entries; use Text size for sphere text.";
+"作用于球面文字与时间线词条" = "Applies to sphere text and timeline entries";
+"时间线磨砂浓度：越低越透出桌面，越高越护眼" = "Frosted strength of the timeline background; lower reveals more of the desktop, higher is easier on the eyes.";
 "在 Dock 显示图标" = "Show icon in Dock";
 "在 Finder 中显示" = "Show in Finder";
 "在任意 App 选中文字，按保存快捷键，它就会出现在这里。" = "Select text in any app and press the save shortcut to see it here.";
@@ -77,7 +81,7 @@
 "复制的内容会出现在这里；点行尾的加号按钮可收入词库。" = "Copied items appear here. Click the plus button to save text to your library.";
 "复数" = "Plural";
 "外观" = "Appearance";
-"实时调参" = "Live adjustments";
+"星图设置" = "Galaxy Settings";
 "导出 Markdown" = "Export Markdown";
 "导出 Markdown…" = "Export Markdown…";
 "将删除全部词条与时间线事件；剪贴板历史不受影响" = "Deletes all library entries and timeline events; clipboard history is unaffected.";
@@ -89,7 +93,6 @@
 "已复制" = "Copied";
 "已收入词库" = "Saved to library";
 "已跳过安全输入框（密码）" = "Skipped a secure text field (password)";
-"应用于星图顶栏、轨道属性卡、注释卡、检索框与提示条；球面文字大小在星图调参面板调整" = "Applies to the galaxy toolbar, detail and note cards, search field and hints; adjust sphere text in the galaxy controls.";
 "应用于查词与翻译浮窗" = "Applies to the dictionary and translation popup.";
 "应用于词库与剪贴板列表、时间线及编辑面板" = "Applies to library and clipboard lists, timeline and editor.";
 "当前系统不支持触控板监听；保存快捷键仍可使用。" = "Trackpad monitoring is unavailable on this system. The save shortcut still works.";

@@ -273,7 +273,7 @@ private struct GalaxyTuningToggle: View {
     @ObservedObject private var model = GalaxyWindowController.shared.model
 
     var body: some View {
-        Toggle("实时调参", isOn: $model.showTuning)
+        Toggle("星图设置", isOn: $model.showTuning)
             .keyboardShortcut(",", modifiers: .command)
     }
 }

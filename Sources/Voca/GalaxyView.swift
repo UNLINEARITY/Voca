@@ -210,6 +210,9 @@ final class GalaxyModel: ObservableObject {
     /// 调参面板开关：菜单栏「星图」菜单持有，会话内共享
     @Published var showTuning = false
 
+    /// 指针悬停在星图设置面板上：滚轮/捏合让位给面板自身（非发布，避免重绘）
+    var isPointerOverGalaxySettings = false
+
     /// 检索档时间词墙：时间轴缩放（1 = 默认视野）与水平平移（像素）
     @Published var timeWallScale: Double = 1
     @Published var timeWallOffset: Double = 0
@@ -518,9 +521,11 @@ final class GalaxyWindowController {
                 self.model.turnTimelinePage(with: event)
                 return nil
             }
-            // 时间线档：双指左右滑动/拖动＝平移；垂直滚轮或双指上下滚＝缩放（与捏合并存）
+            // 时间线档：双指左右滑动/拖动＝平移；垂直滚轮或双指上下滚＝缩放（与捏合并存）；
+            // 指针悬停在星图设置面板上时让位，滚动/捏合交给面板自身
             if self.model.source == .search,
                event.type == .scrollWheel || event.type == .magnify,
+               !self.model.isPointerOverGalaxySettings,
                self.window?.frame.contains(NSEvent.mouseLocation) == true {
                 let width = self.window?.contentView?.bounds.width ?? 0
                 switch event.type {
@@ -601,6 +606,7 @@ private struct GalaxyView: View {
     @EnvironmentObject private var watcher: ClipboardWatcher
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
     @AppStorage("galaxyChromeFontSize") private var galaxyChromeFontSize = 13.0
+    @AppStorage("timelineBackgroundStrength") private var timelineBackgroundStrength = 70.0
     @State private var editingClip: Clip?
     @State private var deletingEntry: GalaxyEntry?
     @State private var promotedIDs: Set<UUID> = []
@@ -662,16 +668,7 @@ private struct GalaxyView: View {
             }
 
             // 调参面板必须在选中轨道/时间线之上：否则全屏 Canvas 会拦截滑杆的点击
-            if model.showTuning && model.source != .search {
-                tuningPanel
-                    .padding(.leading, 24)
-                    .frame(
-                        maxWidth: .infinity,
-                        maxHeight: .infinity,
-                        alignment: .topLeading
-                    )
-                    .padding(.top, 70)
-            }
+            tuningOverlay
         }
         .animation(selectionAnimation, value: model.selectedItem?.clipId)
         .animation(selectionAnimation, value: model.isTimelineVisible)
@@ -684,21 +681,20 @@ private struct GalaxyView: View {
         return false
     }
 
-    /// 时间线档：全屏时间词墙；选中详情作为浮层盖在刻度之上（不挤压词墙布局）。
+    /// 时间线档：全屏时间词墙（磨砂背景全幅）；调参面板为左上真浮窗；
+    /// 选中详情作为浮层盖在刻度之上（不挤压词墙布局）。
     private func timelineLayout(availableWidth: CGFloat) -> some View {
         ZStack(alignment: .bottom) {
-            HStack(spacing: 0) {
-                if model.showTuning {
-                    tuningPanel
-                        .padding(.horizontal, 16)
-                        .frame(width: 286)
-                        .frame(maxHeight: .infinity, alignment: .top)
-                        .background(.regularMaterial)
-                }
-                GeometryReader { area in
-                    searchDanmakuLayer(area)
-                }
+            GeometryReader { area in
+                searchDanmakuLayer(area)
             }
+            .frame(maxWidth: .infinity, maxHeight: .infinity)
+            .background(
+                AnyShapeStyle(.regularMaterial)
+                    .opacity(Double(timelineBackgroundStrength) / 100)
+            )
+
+            tuningOverlay
 
             if model.selectedItem != nil {
                 selectionDetail(availableWidth: availableWidth)
@@ -994,18 +990,35 @@ private struct GalaxyView: View {
         .accessibilityLabel(label)
     }
 
-    // MARK: 实时调参面板
+    // MARK: 星图设置面板
+
+    /// 调参浮窗：左上悬浮玻璃卡（球体档与时间线档共用同一呈现）
+    @ViewBuilder
+    private var tuningOverlay: some View {
+        if model.showTuning {
+            tuningPanel
+                .padding(.leading, 24)
+                .padding(.top, 24)
+                .frame(
+                    maxWidth: .infinity,
+                    maxHeight: .infinity,
+                    alignment: .topLeading
+                )
+        }
+    }
 
     private var tuningPanel: some View {
         ScrollView {
             VStack(alignment: .leading, spacing: 14) {
                 HStack {
-                    Label("实时调参", systemImage: "slider.horizontal.3")
+                    Label("星图设置", systemImage: "slider.horizontal.3")
                         .font(.headline)
                     Spacer()
                     Button("重置") {
                         tuning.reset()
                         model.fontScale = 1.0
+                        galaxyChromeFontSize = 13
+                        timelineBackgroundStrength = 70
                     }
                     .buttonStyle(.glass)
                     Button {
@@ -1055,7 +1068,15 @@ private struct GalaxyView: View {
                 Divider()
 
                 tuningSlider("文字大小", value: $model.fontScale, range: 0.5...2.5, format: "%.2f×")
-                Text("作用于球面文字；星图界面文字在设置页「星图界面字号」调整")
+                Text("作用于球面文字与时间线词条")
+                    .font(.caption2)
+                    .foregroundStyle(.secondary)
+                tuningSlider("星图界面字号", value: $galaxyChromeFontSize, range: 12...18, format: "%.0f pt")
+                Text("应用于星图轨道卡、注释卡与时间线词条；球面文字用「文字大小」调整")
+                    .font(.caption2)
+                    .foregroundStyle(.secondary)
+                tuningSlider("时间线背景", value: $timelineBackgroundStrength, range: 30...100, format: "%.0f%%")
+                Text("时间线磨砂浓度：越低越透出桌面，越高越护眼")
                     .font(.caption2)
                     .foregroundStyle(.secondary)
                 tuningSlider("球体大小", value: $tuning.sphereScale, range: 0.25...0.48, format: "%.2f")
@@ -1067,6 +1088,9 @@ private struct GalaxyView: View {
         }
         .frame(width: 250)
         .frame(maxHeight: 430)
+        .onHover { hovering in
+            model.isPointerOverGalaxySettings = hovering
+        }
         .glassEffect(
             .regular.interactive(),
             in: RoundedRectangle(cornerRadius: Radius.panel, style: .continuous)

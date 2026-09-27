@@ -31,7 +31,6 @@ struct SettingsView: View {
     @AppStorage(DisplayLanguage.preferenceKey) private var displayLanguage = DisplayLanguage.system.rawValue
     @AppStorage("listFontSize") private var listFontSize = Typography.listDefault
     @AppStorage("popupFontSize") private var popupFontSize = Typography.popupDefault
-    @AppStorage("galaxyChromeFontSize") private var galaxyChromeFontSize = 13.0
     @AppStorage("popupWidth") private var popupWidth = 400.0
     @AppStorage("popupReadingHeight") private var readingHeight = 148.0
 
@@ -87,10 +86,6 @@ struct SettingsView: View {
             fontSizeRow("列表字号", value: $listFontSize, caption: "应用于词库与剪贴板列表、时间线及编辑面板")
             fontSizeRow("浮窗字号", value: $popupFontSize, caption: "应用于查词与翻译浮窗")
             settingSliderRow(
-                "星图界面字号", value: $galaxyChromeFontSize, range: 12...18,
-                caption: "应用于星图顶栏、轨道属性卡、注释卡、检索框与提示条；球面文字大小在星图调参面板调整"
-            )
-            settingSliderRow(
                 "浮窗宽度", value: $popupWidth, range: 360...560,
                 caption: "查词与翻译浮窗的宽度（360–560pt），高度随内容自适应"
             )
@@ -123,7 +118,8 @@ struct SettingsView: View {
     }
 
     private func settingSliderRow(
-        _ title: String, value: Binding<Double>, range: ClosedRange<Double>, caption: String
+        _ title: String, value: Binding<Double>, range: ClosedRange<Double>, caption: String,
+        unit: String = "pt"
     ) -> some View {
         VStack(alignment: .leading, spacing: 4) {
             HStack {
@@ -131,7 +127,7 @@ struct SettingsView: View {
                 Spacer()
                 Slider(value: value, in: range, step: 1)
                     .frame(width: 240)
-                Text("\(Int(value.wrappedValue)) pt")
+                Text("\(Int(value.wrappedValue)) \(unit)")
                     .monospacedDigit()
                     .foregroundStyle(.secondary)
                     .frame(width: 44, alignment: .trailing)
