@@ -18,6 +18,7 @@
 
 import Foundation
 import GRDB
+import os
 
 /// 一条词典词条（数据源 ECDICT，bundle 内只读 SQLite）
 struct DictionaryEntry: Equatable, Codable, FetchableRecord {
@@ -107,6 +108,7 @@ struct DictionaryEnrichment: Equatable {
 /// 查询链：原文 → 清洗（引号/所有格/首尾标点）→ 大小写不敏感精确匹配；
 /// 命中词形变体（went）时顺带取回原形（go）词条。
 final class DictionaryService: @unchecked Sendable {
+    private static let logger = Logger(subsystem: "local.voca.Voca", category: "dictionary")
     /// 词典元信息（来源/条目数等，设置页展示）
     struct Meta {
         let source: String
@@ -115,8 +117,20 @@ final class DictionaryService: @unchecked Sendable {
         let entries: Int
         let generated: String
     }
-    /// 共享实例：bundle 内词典缺失时退化为永远查不到
-    static let shared = DictionaryService(bundleResource: "dictionary", extension: "sqlite")
+    /// 共享实例：优先用用户目录的完整版词典（本地自构建，不入库），
+    /// 否则用 bundle 内精简版；两者都缺失时退化为永远查不到
+    static let shared = DictionaryService(userOverride: "dictionary-full.sqlite")
+        ?? DictionaryService(bundleResource: "dictionary", extension: "sqlite")
+
+    /// 用户目录覆盖：~/Library/Application Support/Voca/<name> 存在时启用，否则 nil
+    private convenience init?(userOverride name: String) {
+        let url = URL(fileURLWithPath: NSHomeDirectory())
+            .appendingPathComponent("Library/Application Support/Voca", isDirectory: true)
+            .appendingPathComponent(name)
+        guard FileManager.default.fileExists(atPath: url.path) else { return nil }
+        Self.logger.info("使用用户目录词典：\(url.path, privacy: .public)")
+        self.init(url: url)
+    }
 
     private let dbQueue: DatabaseQueue?
 

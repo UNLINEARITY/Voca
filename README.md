@@ -37,7 +37,7 @@ The app follows your macOS language preference by default: Simplified Chinese is
 | Word galaxy | Open the fullscreen galaxy from the menu bar or workspace. Explore library, clipboard text, or search results; rotate the sphere, open item details, and return to the workspace. A native fallback remains usable without screen capture. |
 | Optional three-finger gesture | Enable the experimental gesture in the menu bar or Settings, then swipe down with three fingers on an Apple trackpad to save selected text. The keyboard shortcut remains available. |
 
-Double-clicking a word or phrase in a library list or galaxy opens a read-only lookup popup. The embedded English→Chinese dictionary includes pronunciation, learning annotations, word families, related phrases, and synonyms where available; British and American speech buttons use system voices. Popup width, reading area height, and text sizes can be adjusted in Settings. The lookup language pair is English↔Chinese; the app's display language does not change the dictionary's underlying content.
+Double-clicking a word or phrase in a library list or galaxy opens a read-only lookup popup. The embedded English→Chinese dictionary includes pronunciation, learning annotations, word families, related phrases, and synonyms where available; British and American speech buttons use system voices. Popup width, reading area height, and text sizes can be adjusted in Settings. The lookup language pair is English↔Chinese; the app's display language does not change the dictionary's underlying content. When Settings → Dictionary → Speak after lookup is on, opening a dictionary card speaks the word automatically, British first and then American.
 
 ### Navigation and shortcuts
 

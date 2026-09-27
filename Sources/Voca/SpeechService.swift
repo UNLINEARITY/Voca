@@ -51,14 +51,21 @@ final class SpeechService {
 
     /// 朗读文本；打断上一段正在朗读的内容
     func speak(_ text: String, accent: SpeechAccent) {
-        let utterance = AVSpeechUtterance(string: text)
-        if let voice = voices[accent] {
-            utterance.voice = voice
-        }
-        // 单词朗读略慢于默认语速，便于听清
-        utterance.rate = AVSpeechUtteranceDefaultSpeechRate * 0.85
+        speakQueued(text, accents: [accent])
+    }
+
+    /// 依次朗读多个口音（入队顺序播放，不互相打断）
+    func speakQueued(_ text: String, accents: [SpeechAccent]) {
         synthesizer.stopSpeaking(at: .immediate)
-        synthesizer.speak(utterance)
+        for accent in accents {
+            let utterance = AVSpeechUtterance(string: text)
+            if let voice = voices[accent] {
+                utterance.voice = voice
+            }
+            // 单词朗读略慢于默认语速，便于听清
+            utterance.rate = AVSpeechUtteranceDefaultSpeechRate * 0.85
+            synthesizer.speak(utterance)
+        }
     }
 
     /// 立即停止朗读

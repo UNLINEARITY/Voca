@@ -23,12 +23,14 @@
   - 词根词缀：ECDICT 仓库 wordroot.txt（MIT）
   - 英英同义词：Moby Thesaurus II（Grady Ward，公有领域）
 用法：
-  全量生成：python3 scripts/make_dictionary.py <ecdict.csv> \
+  精简版（默认）：python3 scripts/make_dictionary.py <ecdict.csv> \
+              [--wordroot wordroot.txt] [--thesaurus mthesaur.txt]
+  完整版：      python3 scripts/make_dictionary.py <ecdict.csv> --preset full \
               [--wordroot wordroot.txt] [--thesaurus mthesaur.txt]
   仅增强：  python3 scripts/make_dictionary.py --enrich <dictionary.sqlite> \
               --wordroot wordroot.txt --thesaurus mthesaur.txt
 
-收录规则（目标：单词 + 短语 + 专业术语的离线词典）：
+收录规则（默认 preset=core，目标：单词 + 短语 + 专业术语的离线词典）：
   1. 核心：当代语料库词频 frq 或 BNC 词频 bnc 排名前 15 万；
      或柯林斯星级 collins>=1；或牛津 3000 核心词 oxford=1
   2. 注释长尾：无排名但自带音标、且为纯字母单词（长度<=25）；
@@ -37,6 +39,9 @@
      （went/gave 等本身无词频排名的词形）
   4. 短语与专业术语：2 到 5 个单词、带中文释义的多词词条
      （含 [计]/[医]/[化]/[经] 等领域术语，全量收录）
+
+preset=full 在 core 基础上放宽（收录无音标但有释义的单词、短语 2-8 词）；
+注意：生成体积同时取决于源 CSV 规模（仓库内置精简版源自较小源文件）。
 
 增强表（--wordroot / --thesaurus 可选输入）：
   roots(word_roots) —— 词根词缀库与词条直接反查索引
@@ -64,9 +69,9 @@ import sys
 SINGLE_WORD = re.compile(r"^[A-Za-z][A-Za-z'\-]*$")
 ACRONYM = re.compile(r"^[A-Z]{2,8}$")
 MAX_WORD_LEN = 25
-FREQ_TOP = 150_000
+FREQ_TOP = {"core": 150_000, "full": 300_000}
 PHRASE_MIN_WORDS = 2
-PHRASE_MAX_WORDS = 5
+PHRASE_MAX_WORDS = {"core": 5, "full": 8}
 
 COLUMNS = ["word", "phonetic", "translation", "definition",
            "exchange", "tag", "collins", "oxford", "bnc", "frq"]
@@ -155,8 +160,10 @@ def load_entries(csv_path):
     return entries
 
 
-def select_entries(entries):
+def select_entries(entries, preset="core"):
     """按收录规则筛选，返回 {word_lower: row}。"""
+    freq_top = FREQ_TOP[preset]
+    phrase_max = PHRASE_MAX_WORDS[preset]
     selected = {}
 
     def keep(word, row):
@@ -171,17 +178,22 @@ def select_entries(entries):
         phonetic = (row.get("phonetic") or "").strip()
         translation = (row.get("translation") or "").strip()
         definition = (row.get("definition") or "").strip()
-        if (0 < frq <= FREQ_TOP or 0 < bnc <= FREQ_TOP
+        if (0 < frq <= freq_top or 0 < bnc <= freq_top
                 or collins >= 1 or oxford == 1):
             keep(word, row)
-        elif (phonetic and SINGLE_WORD.match(word) and len(word) <= MAX_WORD_LEN):
+        elif ((preset == "full" and (phonetic or translation)
+                or preset == "core" and phonetic)
+                and SINGLE_WORD.match(word) and len(word) <= MAX_WORD_LEN):
             keep(word, row)
         elif (translation and (ACRONYM.match(word)
                               or translation.lower().startswith("abbr")
                               or definition.lower().startswith("abbr"))):
             keep(word, row)
-        elif (PHRASE_MIN_WORDS <= len(word.split()) <= PHRASE_MAX_WORDS
-                and translation):
+        elif (PHRASE_MIN_WORDS <= len(word.split()) <= phrase_max
+                and translation
+                and (preset == "core"
+                     or not translation.startswith("[网络]")
+                     or frq > 0 or bnc > 0)):
             keep(word, row)
 
     # 规则 3：词形家族（exchange "0:<原形>" 指向已收录词）
@@ -201,7 +213,7 @@ def select_entries(entries):
     return selected
 
 
-def build_db(selected, out_path):
+def build_db(selected, out_path, preset="core"):
     if os.path.exists(out_path):
         os.remove(out_path)
     db = sqlite3.connect(out_path)
@@ -232,8 +244,9 @@ def build_db(selected, out_path):
                 ("source_url", "https://github.com/skywind3000/ECDICT"),
                 ("source_license", "MIT"),
                 ("entries", str(len(selected))),
-                ("freq_top", str(FREQ_TOP)),
-                ("phrase_max_words", str(PHRASE_MAX_WORDS)),
+                ("freq_top", str(FREQ_TOP[preset])),
+                ("phrase_max_words", str(PHRASE_MAX_WORDS[preset])),
+                ("preset", preset),
                 ("generated", datetime.date.today().isoformat()),
             ])
         db.commit()
@@ -250,6 +263,8 @@ def main():
     parser.add_argument("ecdict_csv", nargs="?", help="ECDICT 的 ecdict.csv 路径")
     parser.add_argument("--enrich", metavar="DB",
                         help="仅增强已有词典库（词根/同义词表），不重算词条")
+    parser.add_argument("--preset", choices=["core", "full"], default="core",
+                        help="收录规则预设：core＝精简（默认），full＝完整（体积约 4 倍）")
     parser.add_argument("--wordroot", help="ECDICT wordroot.txt 路径（词根词缀）")
     parser.add_argument("--thesaurus", help="Moby Thesaurus II mthesaur.txt 路径")
     parser.add_argument("-o", "--output",
@@ -277,10 +292,10 @@ def main():
         sys.exit("请提供 ecdict.csv，或使用 --enrich 增强已有词典库")
 
     entries = load_entries(args.ecdict_csv)
-    print(f"读取 {len(entries)} 条原始词条")
-    selected = select_entries(entries)
+    print(f"读取 {len(entries)} 条原始词条（preset={args.preset}）")
+    selected = select_entries(entries, preset=args.preset)
     os.makedirs(os.path.dirname(os.path.abspath(args.output)), exist_ok=True)
-    build_db(selected, args.output)
+    build_db(selected, args.output, preset=args.preset)
     if args.wordroot or args.thesaurus:
         db = sqlite3.connect(args.output)
         try:

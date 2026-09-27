@@ -286,6 +286,7 @@ private struct LookupPopupView: View {
     let onSave: (String?) -> Void
     @AppStorage("popupFontSize") private var popupFontSize = Typography.popupDefault
     @AppStorage("popupWidth") private var popupWidth = 400.0
+    @AppStorage("lookupAutoSpeakEnabled") private var autoSpeakEnabled = false
     @State private var saved = false
     @State private var translationResult: String?
 
@@ -338,6 +339,14 @@ private struct LookupPopupView: View {
         .padding(12)
         .frame(width: popupWidth, alignment: .leading)
         .floatingSurface()
+        .task {
+            // 设置开启时，词典卡浮窗打开即自动朗读：先英后美连播
+            if autoSpeakEnabled, case .card(let result) = content {
+                SpeechService.shared.speakQueued(
+                    result.entry.word, accents: [.british, .american]
+                )
+            }
+        }
     }
 
     /// 英/美发音按钮（仅对非空英文文本显示）

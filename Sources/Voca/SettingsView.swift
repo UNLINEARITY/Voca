@@ -33,6 +33,7 @@ struct SettingsView: View {
     @AppStorage("popupFontSize") private var popupFontSize = Typography.popupDefault
     @AppStorage("popupWidth") private var popupWidth = 400.0
     @AppStorage("popupReadingHeight") private var readingHeight = 148.0
+    @AppStorage("lookupAutoSpeakEnabled") private var lookupAutoSpeak = false
 
     private var databaseURL: URL { ClipStore.defaultURL() }
 
@@ -41,6 +42,7 @@ struct SettingsView: View {
             Form {
                 generalSection
                 appearanceSection
+                dictionarySection
                 shortcutSection
                 librarySection
                 databaseSection
@@ -135,6 +137,17 @@ struct SettingsView: View {
             Text(L10n.text(caption))
                 .font(.caption)
                 .foregroundStyle(.secondary)
+        }
+    }
+
+    // MARK: - 词典
+
+    private var dictionarySection: some View {
+        Section("词典") {
+            Toggle(isOn: $lookupAutoSpeak) {
+                Label("查词后自动发音", systemImage: "speaker.wave.2")
+            }
+            .toggleStyle(.switch)
         }
     }
 

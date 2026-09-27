@@ -202,6 +202,8 @@
 "记录剪贴板历史" = "Record clipboard history";
 "设置" = "Settings";
 "词典数据" = "Dictionary data";
+"词典" = "Dictionary";
+"查词后自动发音" = "Speak after lookup";
 "词库" = "Library";
 "词库管理" = "Library management";
 "词库还是空的" = "Your library is empty";
