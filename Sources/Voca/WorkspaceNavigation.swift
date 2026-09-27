@@ -75,11 +75,56 @@ final class WorkspaceNavigation: ObservableObject {
         if GalaxyWindowController.shared.isOpen {
             transition(toGalaxy: false, targetTab: tab)
         } else {
-            let window = ensurePanelWindow()
-            window.makeKeyAndOrderFront(nil)
-            focusPanelContainer()
-            NSApp.activate(ignoringOtherApps: true)
+            presentPanelWindow()
         }
+    }
+
+    /// 工作区呈现行为：设置开启时窗口采用 .moveToActiveSpace——
+    /// 显示时落在当前活跃桌面（而非把系统切到窗口所在桌面）；关闭则留在原桌面。
+    private func applyCurrentSpaceBehavior() {
+        let enabled = UserDefaults.standard
+            .object(forKey: "workspaceOpensOnCurrentScreen") as? Bool ?? true
+        let windows = [panelWindow, GalaxyWindowController.shared.hostedWindow]
+            .compactMap { $0 }
+        for window in windows {
+            if enabled {
+                window.collectionBehavior.insert(.moveToActiveSpace)
+            } else {
+                window.collectionBehavior.remove(.moveToActiveSpace)
+            }
+        }
+    }
+
+    /// 冷启动显示面板：默认移到当前屏幕（鼠标所在屏，退化用主屏）居中；
+    /// 设置关闭后保持记忆位置。同屏内不动，尺寸不变。
+    private func presentPanelWindow() {
+        let window = ensurePanelWindow()
+        applyCurrentSpaceBehavior()
+        relocatePanelWindowIfNeeded()
+        window.makeKeyAndOrderFront(nil)
+        focusPanelContainer()
+        NSApp.activate(ignoringOtherApps: true)
+    }
+
+    /// 面板重定位：设置开启且窗口不在鼠标所在屏时，移到该屏居中（同屏不动，尺寸不变）。
+    /// 冷启动与星图→面板过渡两条路径都调用，保证 ⇧⌥V 行为一致。
+    private func relocatePanelWindowIfNeeded() {
+        let opensOnCurrentScreen = UserDefaults.standard
+            .object(forKey: "workspaceOpensOnCurrentScreen") as? Bool ?? true
+        guard opensOnCurrentScreen,
+              let screen = NSScreen.screens.first(where: {
+                  $0.frame.contains(NSEvent.mouseLocation)
+              }) ?? NSScreen.main,
+              let window = panelWindow,
+              !screen.frame.contains(window.frame)
+        else { return }
+        let visible = screen.visibleFrame
+        var frame = window.frame
+        frame.size.width = min(frame.width, visible.width)
+        frame.size.height = min(frame.height, visible.height)
+        frame.origin.x = visible.midX - frame.width / 2
+        frame.origin.y = visible.midY - frame.height / 2
+        window.setFrame(frame, display: true)
     }
 
     func toggleGalaxy() {
@@ -96,6 +141,7 @@ final class WorkspaceNavigation: ObservableObject {
 
     func toggleLastWorkspace() {
         guard !isTransitioning else { return }
+        applyCurrentSpaceBehavior()
         let galaxy = GalaxyWindowController.shared
         if galaxy.isActive {
             galaxy.close()
@@ -208,10 +254,13 @@ final class WorkspaceNavigation: ObservableObject {
 
     private func transition(toGalaxy: Bool, targetTab: WorkspaceTab? = nil) {
         guard !isTransitioning else { return }
+        applyCurrentSpaceBehavior()
         let galaxy = GalaxyWindowController.shared
         let panel = ensurePanelWindow()
         let source = toGalaxy ? tab.galaxySource : galaxy.source
         if !toGalaxy {
+            // 星图回面板：先把面板重定位到当前屏（设置开启时），过渡动画落点即新位置
+            relocatePanelWindowIfNeeded()
             // 星图回面板：检索档回设置页，其余回对应列表
             let backTab: WorkspaceTab = switch source {
             case .clipboard: .clipboard

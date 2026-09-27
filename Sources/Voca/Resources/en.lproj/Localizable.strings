@@ -62,6 +62,7 @@
 "回到工作区面板（⇧⌥↑）" = "Return to workspace (⇧⌥↑)";
 "图片复制失败" = "Could not copy image";
 "图片读取失败" = "Could not read image";
+"在当前屏幕打开工作区" = "Open the workspace on the current screen";
 "在 Dock 显示图标" = "Show icon in Dock";
 "在 Finder 中显示" = "Show in Finder";
 "在任意 App 选中文字，按保存快捷键，它就会出现在这里。" = "Select text in any app and press the save shortcut to see it here.";

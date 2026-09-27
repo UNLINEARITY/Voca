@@ -295,8 +295,13 @@ struct SharedToggleRows: View {
     @ObservedObject private var model = AppModel.shared
     @EnvironmentObject private var watcher: ClipboardWatcher
     @AppStorage("rootDecompositionEnabled") private var rootDecompositionEnabled = true
+    @AppStorage("workspaceOpensOnCurrentScreen") private var opensOnCurrentScreen = true
 
     var body: some View {
+        Toggle(isOn: $opensOnCurrentScreen) {
+            Label("在当前屏幕打开工作区", systemImage: "display")
+        }
+        .toggleStyle(.switch)
         Toggle(isOn: $model.showsDockIcon) {
             Label("在 Dock 显示图标", systemImage: "dock.rectangle")
         }
