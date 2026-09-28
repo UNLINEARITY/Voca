@@ -321,11 +321,22 @@ final class GalaxyModel: ObservableObject {
             return GalaxyItem(
                 clipId: id,
                 text: Self.displayText(entry.text),
-                fontSize: 25,
+                fontSize: Self.sphereFontSize(for: entry),
                 entry: entry,
                 position: positions[index]
             )
         }
+    }
+
+    /// 词库球面按保存计数放大基础字号（+2.5/次、封顶 +20，比弹幕的 +12 更强表现力）；
+    /// 剪贴板历史无计数，保持基准字号。文字大小滑杆在此之上整体缩放。
+    static func sphereFontSize(for entry: GalaxyEntry) -> CGFloat {
+        guard case .library(let clip) = entry else { return 25 }
+        return sphereFontSize(count: clip.count)
+    }
+
+    static func sphereFontSize(count: Int) -> CGFloat {
+        25 + CGFloat(min(20, Double(max(0, count - 1)) * 2.5))
     }
 
     private static func positions(count: Int, distribution: GalaxyDistribution) -> [SIMD3<Float>] {

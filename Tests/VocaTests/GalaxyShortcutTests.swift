@@ -91,6 +91,44 @@ final class GalaxyShortcutTests: XCTestCase {
         XCTAssertEqual(KeyboardShortcuts.getShortcut(for: .galaxyTuning), custom)
     }
 
+    func testSphereFontSizeScalesWithSaveCount() {
+        XCTAssertEqual(GalaxyModel.sphereFontSize(count: 1), 25)
+        XCTAssertEqual(GalaxyModel.sphereFontSize(count: 2), 27.5)
+        XCTAssertEqual(GalaxyModel.sphereFontSize(count: 5), 35)
+        XCTAssertEqual(GalaxyModel.sphereFontSize(count: 9), 45)
+        XCTAssertEqual(GalaxyModel.sphereFontSize(count: 100), 45)
+        XCTAssertEqual(GalaxyModel.sphereFontSize(count: 0), 25)
+    }
+
+    /// 帮助页快捷键目录是单一来源：新增 KeyboardShortcuts.Name 而未登记进
+    /// HelpShortcutCatalog 时，此测试失败，确保帮助页自动覆盖全部快捷键。
+    func testEveryCustomizableShortcutIsCataloguedForHelp() throws {
+        let sources = URL(fileURLWithPath: #filePath)
+            .deletingLastPathComponent().deletingLastPathComponent()
+            .deletingLastPathComponent().appendingPathComponent("Sources/Voca")
+        let files = try FileManager.default.contentsOfDirectory(at: sources, includingPropertiesForKeys: nil)
+            .filter { $0.pathExtension == "swift" }
+        let declaration = try NSRegularExpression(pattern: #"static\s+let\s+(\w+)\s*=\s*Self\(\"(\w+)\""#)
+        var declared: Set<String> = []
+        for file in files {
+            let source = try String(contentsOf: file, encoding: .utf8)
+            guard source.contains("extension KeyboardShortcuts.Name") else { continue }
+            let range = NSRange(source.startIndex..., in: source)
+            for match in declaration.matches(in: source, range: range) {
+                guard let nameRange = Range(match.range(at: 2), in: source) else { continue }
+                declared.insert(String(source[nameRange]))
+            }
+        }
+        let catalogued = Set(HelpShortcutCatalog.customizable.map(\.name.rawValue))
+        XCTAssertEqual(
+            declared.subtracting(catalogued), [],
+            "新增 KeyboardShortcuts.Name 必须登记进 HelpShortcutCatalog，帮助页才会自动列出它"
+        )
+        XCTAssertFalse(HelpShortcutCatalog.fixed.isEmpty)
+        XCTAssertEqual(HelpShortcutCatalog.customizable.map(\.name.rawValue).count, catalogued.count,
+                       "帮助页目录中的可自定义快捷键不得重复")
+    }
+
     func testCustomShortcutAndClearingAreRespected() {
         let custom = KeyboardShortcuts.Shortcut(.h, modifiers: [.option, .shift])
         XCTAssertTrue(GalaxyWindowController.shouldToggleTuning(

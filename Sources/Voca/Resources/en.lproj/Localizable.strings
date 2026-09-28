@@ -74,7 +74,8 @@
 "时间线磨砂浓度：越低越透出桌面，越高越护眼" = "Frosted strength of the timeline background; lower reveals more of the desktop, higher is easier on the eyes.";
 "在 Dock 显示图标" = "Show icon in Dock";
 "在 Finder 中显示" = "Show in Finder";
-"在任意 App 选中文字，按保存快捷键，它就会出现在这里。" = "Select text in any app and press the save shortcut to see it here.";
+"在任意 App 选中文字按保存快捷键，或在此直接添加词条。" = "Select text in any app and press the save shortcut, or add an entry here directly.";
+"添加词条" = "Add entry";
 "均匀散点" = "Even scatter";
 "备份…" = "Back Up…";
 "备份生成运行中安全的紧凑快照（单文件 SQLite，含最近保存）" = "Creates a compact, safe snapshot while the app is running (one SQLite file, including recent saves).";
@@ -131,6 +132,7 @@
 "⇧⌥←→ 切换工作区标签或星图档位（未编辑文字时）" = "⇧⌥←→ Switch workspace tabs or galaxy modes (outside text editing)";
 "⇧⌘←→ 也可切换星图档位（未编辑文字时）" = "⇧⌘←→ Also switches galaxy modes (outside text editing)";
 "⌘, 开关星图设置（仅显示 Dock 图标时）" = "⌘, Toggles Galaxy Settings (Dock icon visible only)";
+"词库页 ⌘N 直接添加词条" = "In the library tab, ⌘N adds an entry directly";
 "Return 编辑词库球面选中的词条" = "Return edits the selected Library sphere entry";
 "ESC 关闭查词浮窗；星图中先取消选择，再退出" = "Esc closes the lookup popup; in the galaxy, deselects before exiting";
 "拖动或双指左右滑动浏览 · 滚轮或捏合缩放 · 双击空白复位" = "Drag or scroll horizontally to browse · scroll wheel or pinch to zoom · double-click empty space to reset";

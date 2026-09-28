@@ -327,6 +327,29 @@ private final class HelpWindowController {
     }
 }
 
+/// 帮助页快捷键清单的单一来源：新增快捷键必须在此登记（可自定义项或固定键），
+/// HelpContentView 只渲染此目录；源码扫描测试会拦截漏登记的 KeyboardShortcuts.Name。
+enum HelpShortcutCatalog {
+    /// 可自定义快捷键：帮助页自动逐项显示当前绑定（含未设置态）
+    static let customizable: [(label: String, name: KeyboardShortcuts.Name)] = [
+        ("保存选中文字：", .saveSelection),
+        ("查词 / 翻译：", .lookupWord),
+        ("打开工作区：", .openGalaxy),
+        ("星图设置（仅星图聚焦时）：", .galaxyTuning),
+    ]
+
+    /// 固定按键：按场景说明，新增固定键时同样在此登记
+    static let fixed: [String] = [
+        "⇧⌥←→ 切换工作区标签或星图档位（未编辑文字时）",
+        "⇧⌘←→ 也可切换星图档位（未编辑文字时）",
+        "工作区中 ⇧⌥↓ 进入星图 · 星图中 ⇧⌥↑ 返回工作区",
+        "⌘, 开关星图设置（仅显示 Dock 图标时）",
+        "词库页 ⌘N 直接添加词条",
+        "Return 编辑词库球面选中的词条",
+        "ESC 关闭查词浮窗；星图中先取消选择，再退出",
+    ]
+}
+
 struct HelpContentView: View {
     @AppStorage(DisplayLanguage.preferenceKey) private var displayLanguage = DisplayLanguage.system.rawValue
     @State private var shortcutRevision = 0
@@ -339,18 +362,12 @@ struct HelpContentView: View {
         let _ = shortcutRevision // Keep the open help window in sync with shortcut recordings.
         ScrollView {
             VStack(alignment: .leading, spacing: 14) {
-                helpSection("快捷键", items: [
-                    Self.shortcutLine("保存选中文字：", name: .saveSelection, language: language),
-                    Self.shortcutLine("查词 / 翻译：", name: .lookupWord, language: language),
-                    Self.shortcutLine("打开工作区：", name: .openGalaxy, language: language),
-                    Self.shortcutLine("星图设置（仅星图聚焦时）：", name: .galaxyTuning, language: language),
-                    L10n.text("⇧⌥←→ 切换工作区标签或星图档位（未编辑文字时）", language: language),
-                    L10n.text("⇧⌘←→ 也可切换星图档位（未编辑文字时）", language: language),
-                    L10n.text("工作区中 ⇧⌥↓ 进入星图 · 星图中 ⇧⌥↑ 返回工作区", language: language),
-                    L10n.text("⌘, 开关星图设置（仅显示 Dock 图标时）", language: language),
-                    L10n.text("Return 编辑词库球面选中的词条", language: language),
-                    L10n.text("ESC 关闭查词浮窗；星图中先取消选择，再退出", language: language),
-                ])
+                helpSection("快捷键", items:
+                    HelpShortcutCatalog.customizable.map {
+                        Self.shortcutLine($0.label, name: $0.name, language: language)
+                    }
+                    + HelpShortcutCatalog.fixed.map { L10n.text($0, language: language) }
+                )
                 helpSection("星图", items: [
                     L10n.text("拖拽或双指滑动旋转球体", language: language),
                 ])
@@ -484,20 +501,30 @@ struct RecordsView: View {
     @State private var timelineClip: Clip?
     @State private var deletingClip: Clip?
     @State private var confirmingClearAll = false
+    @State private var addingEntry = false
 
     var body: some View {
         NavigationStack {
             Group {
                 if store.clips.isEmpty {
-                    ContentUnavailableView(
-                        search.isEmpty ? "词库还是空的" : "没有匹配的词条",
-                        systemImage: search.isEmpty ? "list.bullet.rectangle" : "magnifyingglass",
-                        description: Text(
+                    ContentUnavailableView {
+                        Label(
+                            search.isEmpty ? "词库还是空的" : "没有匹配的词条",
+                            systemImage: search.isEmpty ? "list.bullet.rectangle" : "magnifyingglass"
+                        )
+                    } description: {
+                        Text(
                             search.isEmpty
-                                ? "在任意 App 选中文字，按保存快捷键，它就会出现在这里。"
+                                ? "在任意 App 选中文字按保存快捷键，或在此直接添加词条。"
                                 : "换个关键词试试。"
                         )
-                    )
+                    } actions: {
+                        if search.isEmpty {
+                            Button("添加词条") {
+                                addingEntry = true
+                            }
+                        }
+                    }
                 } else {
                     List(store.clips) { clip in
                         ClipRow(
@@ -529,6 +556,14 @@ struct RecordsView: View {
             .toolbar {
                 ToolbarItem(placement: .primaryAction) {
                     Button {
+                        addingEntry = true
+                    } label: {
+                        Label("添加词条", systemImage: "plus")
+                    }
+                    .keyboardShortcut("n", modifiers: .command)
+                }
+                ToolbarItem(placement: .primaryAction) {
+                    Button {
                         exportMarkdown()
                     } label: {
                         Label("导出 Markdown", systemImage: "square.and.arrow.down")
@@ -553,6 +588,11 @@ struct RecordsView: View {
             .sheet(item: $editingClip) { clip in
                 EditClipSheet(clip: clip) { text, note in
                     store.update(clip, text: text, note: note)
+                }
+            }
+            .sheet(isPresented: $addingEntry) {
+                EditClipSheet(clip: nil) { text, note in
+                    addEntry(text: text, note: note)
                 }
             }
             .sheet(item: $timelineClip) { clip in
@@ -588,6 +628,26 @@ struct RecordsView: View {
             } message: {
                 Text(L10n.format("将永久删除全部 %d 个词条及其时间线", store.clips.count))
             }
+        }
+    }
+
+    /// 手动添加词条：与划词保存同一合并语义（同文本计数 +1、置顶并记事件），
+    /// 来源记为 Voca；备注留空不覆盖已有备注
+    private func addEntry(text: String, note: String?) {
+        do {
+            let clip = try store.save(
+                text: text,
+                appName: "Voca",
+                bundleID: Bundle.main.bundleIdentifier,
+                note: note
+            )
+            ToastController.shared.show(
+                clip.count > 1
+                    ? L10n.format("已入库（第 %d 次）", clip.count)
+                    : L10n.text("已收入词库")
+            )
+        } catch {
+            ToastController.shared.show(L10n.format("保存失败：%@", error.localizedDescription))
         }
     }
 
@@ -725,18 +785,18 @@ struct ClipRow: View {
 
 /// 编辑记录：修改文本、添加备注
 struct EditClipSheet: View {
-    let clip: Clip
+    let clip: Clip?
     let onSave: (String, String?) -> Void
     @Environment(\.dismiss) private var dismiss
     @AppStorage("listFontSize") private var listFontSize = Typography.listDefault
     @State private var text: String
     @State private var note: String
 
-    init(clip: Clip, onSave: @escaping (String, String?) -> Void) {
+    init(clip: Clip?, onSave: @escaping (String, String?) -> Void) {
         self.clip = clip
         self.onSave = onSave
-        _text = State(initialValue: clip.text)
-        _note = State(initialValue: clip.note ?? "")
+        _text = State(initialValue: clip?.text ?? "")
+        _note = State(initialValue: clip?.note ?? "")
     }
 
     private var trimmedText: String {
@@ -745,7 +805,7 @@ struct EditClipSheet: View {
 
     var body: some View {
         VStack(alignment: .leading, spacing: 10) {
-            Text("编辑记录").font(.headline)
+            Text(clip == nil ? "添加词条" : "编辑记录").font(.headline)
 
             VStack(alignment: .leading, spacing: 4) {
                 Text("内容").font(.caption).foregroundStyle(.secondary)
