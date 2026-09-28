@@ -570,6 +570,12 @@ final class GalaxyWindowController {
                 let width = self.window?.contentView?.bounds.width ?? 0
                 switch event.type {
                 case .scrollWheel:
+                    if event.modifierFlags.contains(.command), event.scrollingDeltaY != 0 {
+                        // ⌘+滚轮：缩放文字大小（时间线档默认滚轮已被时间轴缩放占用）
+                        let sensitivity = event.hasPreciseScrollingDeltas ? 0.006 : 0.075
+                        self.model.zoom(by: exp(event.scrollingDeltaY * sensitivity))
+                        return nil
+                    }
                     if event.scrollingDeltaX != 0 {
                         // 自然滚动方向：内容跟随手指（含惯性阶段）
                         self.model.panTimeWall(
@@ -1096,12 +1102,12 @@ private struct GalaxyView: View {
                 Divider()
 
                 tuningSlider("色散强度", value: $tuning.dispersion, range: 0...30, format: "%.1f")
-                tuningSlider("色散分布", value: $tuning.chromaExponent, range: 1...4, format: "%.2f")
+                tuningSlider("色散分布", value: $tuning.chromaExponent, range: 0.5...4, format: "%.2f")
                 tuningSlider("折射扭曲", value: $tuning.refraction, range: 0...1, format: "%.2f")
                 tuningSlider("扭曲衰减", value: $tuning.warpFalloff, range: 0.4...2, format: "%.2f")
                 tuningSlider("边缘厚度", value: $tuning.rimStrength, range: 0...0.6, format: "%.2f")
-                tuningSlider("内圈起始", value: $tuning.innerRimStart, range: 0.8...0.95, format: "%.2f")
-                tuningSlider("菲涅尔蓝", value: $tuning.fresnelTint, range: 0...0.4, format: "%.2f")
+                tuningSlider("内圈起始", value: $tuning.innerRimStart, range: 0.8...0.995, format: "%.3f")
+                tuningSlider("菲涅尔蓝", value: $tuning.fresnelTint, range: 0...0.8, format: "%.2f")
                 tuningSlider("高光强度", value: $tuning.highlightIntensity, range: 0...2, format: "%.2f")
                 tuningSlider("光斑强度", value: $tuning.causticIntensity, range: 0...3, format: "%.2f")
 
