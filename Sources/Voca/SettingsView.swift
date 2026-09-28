@@ -365,5 +365,10 @@ struct SharedShortcutRows: View {
         KeyboardShortcuts.Recorder(L10n.text("保存选中文字："), name: .saveSelection)
         KeyboardShortcuts.Recorder(L10n.text("查词 / 翻译："), name: .lookupWord)
         KeyboardShortcuts.Recorder(L10n.text("打开工作区："), name: .openGalaxy)
+        KeyboardShortcuts.Recorder(
+            L10n.text("星图设置（仅星图聚焦时）："), name: .galaxyTuning
+        ) { _ in
+            GalaxyWindowController.keepTuningShortcutLocal()
+        }
     }
 }

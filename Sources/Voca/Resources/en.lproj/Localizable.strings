@@ -87,6 +87,7 @@
 "复数" = "Plural";
 "外观" = "Appearance";
 "星图设置" = "Galaxy Settings";
+"星图设置（仅星图聚焦时）：" = "Galaxy settings (galaxy focused):";
 "导出 Markdown" = "Export Markdown";
 "导出 Markdown…" = "Export Markdown…";
 "将删除全部词条与时间线事件；剪贴板历史不受影响" = "Deletes all library entries and timeline events; clipboard history is unaffected.";

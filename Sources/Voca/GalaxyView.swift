@@ -17,6 +17,7 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
 
 import AppKit
+import KeyboardShortcuts
 import SwiftUI
 import simd
 
@@ -509,6 +510,20 @@ final class GalaxyWindowController {
         model.source = order[next]
     }
 
+    static func keepTuningShortcutLocal() {
+        _ = KeyboardShortcuts.Name.galaxyTuning
+        KeyboardShortcuts.disable(.galaxyTuning)
+    }
+
+    nonisolated static func shouldToggleTuning(
+        for event: NSEvent, galaxyIsFocused: Bool, shortcut: KeyboardShortcuts.Shortcut?
+    ) -> Bool {
+        guard galaxyIsFocused, event.type == .keyDown, !event.isARepeat,
+              let shortcut, let pressed = KeyboardShortcuts.Shortcut(event: event)
+        else { return false }
+        return pressed == shortcut
+    }
+
     private func installEventMonitor() {
         removeEventMonitor()
         eventMonitor = NSEvent.addLocalMonitorForEvents(
@@ -516,6 +531,13 @@ final class GalaxyWindowController {
         ) {
             [weak self] event in
             guard let self, self.isOpen else { return event }
+            if Self.shouldToggleTuning(
+                for: event, galaxyIsFocused: self.isActive,
+                shortcut: KeyboardShortcuts.getShortcut(for: .galaxyTuning)
+            ) {
+                self.model.showTuning.toggle()
+                return nil
+            }
             if event.type == .scrollWheel, self.model.isTimelineVisible,
                event.window === self.window {
                 self.model.turnTimelinePage(with: event)

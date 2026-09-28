@@ -36,6 +36,7 @@ Double-clicking a word or phrase in a library list or galaxy opens a read-only l
 
 - **⇧⌥← / ⇧⌥→**: cycle workspace tabs or galaxy modes when an editor or dialog is not handling the keys.
 - **⇧⌥↓**: enter the galaxy for the current tab. **⇧⌥↑**: return to its workspace tab.
+- **⌥⇧G**: toggle Galaxy Settings when the galaxy is focused (customizable in Settings or the menu bar panel).
 - **Esc**: close the lookup popup or leave the galaxy.
 - The three global shortcuts (save, lookup, workspace) can be changed in the menu bar or Settings.
 

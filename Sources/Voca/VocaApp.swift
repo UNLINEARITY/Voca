@@ -26,6 +26,7 @@ extension KeyboardShortcuts.Name {
     // 保留旧标识，避免重置用户已录制的工作区快捷键。
     static let openGalaxy = Self("openGalaxy")
     static let lookupWord = Self("lookupWord")
+    static let galaxyTuning = Self("galaxyTuning", default: .init(.g, modifiers: [.option, .shift]))
 }
 
 @MainActor
@@ -203,6 +204,8 @@ struct VocaApp: App {
         let dockEnabled = UserDefaults.standard.object(forKey: AppModel.showsDockIconKey) != nil
             && UserDefaults.standard.bool(forKey: AppModel.showsDockIconKey)
         NSApplication.shared.setActivationPolicy(dockEnabled ? .regular : .accessory)
+        // Recorder 会为新键位注册全局热键；调参仅由星图的本地按键监听处理。
+        GalaxyWindowController.keepTuningShortcutLocal()
         // 首次启动给默认快捷键，用户可随时在菜单栏改
         if KeyboardShortcuts.getShortcut(for: .saveSelection) == nil {
             KeyboardShortcuts.setShortcut(
