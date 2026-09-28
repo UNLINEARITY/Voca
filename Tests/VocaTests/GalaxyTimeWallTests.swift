@@ -155,4 +155,61 @@ final class GalaxyTimeWallTests: XCTestCase {
         XCTAssertNotNil(hit)
         XCTAssertNil(miss)
     }
+
+    func testZoomClampsToExpandedRange() {
+        let model = GalaxyModel()
+        model.zoomTimeWall(by: 0.001, anchorX: nil, canvasWidth: nil)
+        XCTAssertEqual(model.timeWallScale, TimeWallLayout.minScale)
+        model.zoomTimeWall(by: 100, anchorX: nil, canvasWidth: nil)
+        XCTAssertEqual(model.timeWallScale, TimeWallLayout.maxScale)
+        model.zoomTimeWall(by: 0.5, anchorX: nil, canvasWidth: nil)
+        XCTAssertEqual(model.timeWallScale, 4, accuracy: 0.0001)
+    }
+
+    func testTickGranularityFollowsVisibleSpan() {
+        let day = 86400.0
+        XCTAssertEqual(TimeWallLayout.TickGranularity.pick(forVisibleSpan: 2 * day), .hour)
+        XCTAssertEqual(TimeWallLayout.TickGranularity.pick(forVisibleSpan: 13 * day), .day)
+        XCTAssertEqual(TimeWallLayout.TickGranularity.pick(forVisibleSpan: 15 * day), .month)
+        XCTAssertEqual(TimeWallLayout.TickGranularity.pick(forVisibleSpan: 91 * day), .quarter)
+        XCTAssertEqual(TimeWallLayout.TickGranularity.pick(forVisibleSpan: 361 * day), .quarter)
+        XCTAssertEqual(TimeWallLayout.TickGranularity.pick(forVisibleSpan: 541 * day), .year)
+        XCTAssertEqual(TimeWallLayout.TickGranularity.year.formatTemplate, "y")
+        XCTAssertEqual(TimeWallLayout.TickGranularity.quarter.minorStep.month, 1)
+    }
+
+    func testZoomedOutDenseWallFitsOnScreen() {
+        // 几天内的稠密数据：缩到最小时整条时间线一屏可见，行数不超出屏高
+        let clips = (0..<80).map { index in
+            clip(Int64(index), "word\(index)", daysAgo: Double(index) * 0.04)
+        }
+        let result = TimeWallLayout.layout(
+            clips: clips, canvasSize: CGSize(width: 1000, height: 500),
+            fontBase: 17, scale: TimeWallLayout.minScale, offset: 0
+        )
+        XCTAssertEqual(result.words.count, 80)
+        for word in result.words {
+            XCTAssertGreaterThanOrEqual(word.centerX, 0)
+            XCTAssertLessThanOrEqual(word.centerX, 1000)
+        }
+        let rowHeight: CGFloat = 17 + 14
+        let maxRows = max(1, Int(500 - 48) / Int(rowHeight))
+        XCTAssertLessThanOrEqual((result.words.map(\.row).max() ?? 0) + 1, maxRows)
+        XCTAssertFalse(result.ticks.isEmpty)
+    }
+
+    func testZoomedOutWallStillDrawsTicks() {
+        let clips = [
+            clip(1, "alpha", daysAgo: 800),
+            clip(2, "beta", daysAgo: 400),
+            clip(3, "gamma", daysAgo: 1),
+        ]
+        for scale in [TimeWallLayout.minScale, 1.0] {
+            let result = TimeWallLayout.layout(
+                clips: clips, canvasSize: CGSize(width: 1000, height: 500),
+                fontBase: 17, scale: scale, offset: 0
+            )
+            XCTAssertFalse(result.ticks.isEmpty, "ticks missing at scale \(scale)")
+        }
+    }
 }

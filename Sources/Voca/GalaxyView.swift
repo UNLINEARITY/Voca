@@ -222,7 +222,7 @@ final class GalaxyModel: ObservableObject {
 
     func zoomTimeWall(by factor: Double, anchorX: Double?, canvasWidth: Double?) {
         let old = timeWallScale
-        let new = min(max(old * factor, 1), TimeWallLayout.maxScale)
+        let new = min(max(old * factor, TimeWallLayout.minScale), TimeWallLayout.maxScale)
         guard new != old else { return }
         timeWallScale = new
         // 以指针为锚缩放：保持锚点下的时刻不动

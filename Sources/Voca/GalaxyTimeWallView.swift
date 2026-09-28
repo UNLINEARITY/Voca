@@ -226,6 +226,57 @@ enum TimeWallLayout {
     static let gapCap: TimeInterval = 14 * 86400
     /// 时间轴最大放大倍数
     static let maxScale: Double = 8
+    /// 时间轴最小缩小倍数：布局加宽上限为 8 屏宽，0.125× 恰好让整条时间线
+    /// 一屏可见（scale<1 走总览压缩：行数按 1× 布局适配屏高，横向压缩、词条交叠）
+    static let minScale: Double = 0.125
+
+    /// 刻度粒度按**可见时间窗**（秒/像素 × 画布宽）自适应：
+    /// 缩远见月/年，缩近见日/时；与缩放联动而非固定于数据总跨度
+    enum TickGranularity {
+        case year, quarter, month, day, hour
+
+        static func pick(forVisibleSpan span: TimeInterval) -> TickGranularity {
+            if span > 540 * 86400 { return .year }
+            if span > 90 * 86400 { return .quarter }
+            if span > 14 * 86400 { return .month }
+            if span > 2 * 86400 { return .day }
+            return .hour
+        }
+
+        var step: DateComponents {
+            var c = DateComponents()
+            switch self {
+            case .year: c.year = 1
+            case .quarter: c.quarter = 1
+            case .month: c.month = 1
+            case .day: c.day = 1
+            case .hour: c.hour = 6
+            }
+            return c
+        }
+
+        var minorStep: DateComponents {
+            var c = DateComponents()
+            switch self {
+            case .year: c.month = 1
+            case .quarter: c.month = 1
+            case .month: c.day = 1
+            case .day: c.hour = 3
+            case .hour: c.minute = 30
+            }
+            return c
+        }
+
+        var formatTemplate: String {
+            switch self {
+            case .year: "y"
+            case .quarter: "yMMM"
+            case .month: "MMM"
+            case .day: "MMMd"
+            case .hour: "MMMdHHmm"
+            }
+        }
+    }
     /// 行间水平最小间隙
     private static let rowGap: CGFloat = 8
 
@@ -268,10 +319,16 @@ enum TimeWallLayout {
         let rowHeight = (sizes.max() ?? fontBase) + 14
         let maxRows = max(1, Int(usableHeight / rowHeight))
 
+        // 总览压缩：scale<1 时行分配按 1× 布局计算（行数适配屏高、不爆行），
+        // 横向位置再整体压缩——词条左右交叠但全部可见；
+        // scale≥1 时维持既有碰撞避让分行，且不因缩小而重新加宽
+        let layoutScale = max(scale, 1)
+        let compress = min(scale, 1)
+
         // 迭代求最小内容宽：行数 ≤ maxRows；从铺满宽度开始逐步拉宽
         var contentWidth = availableWidth
         var placed = placeWords(
-            entries: entries, sizes: sizes, axisWidth: contentWidth * scale
+            entries: entries, sizes: sizes, axisWidth: contentWidth * layoutScale
         )
         for _ in 0..<12 {
             let usedRows = placed.map(\.row).max().map { $0 + 1 } ?? 1
@@ -279,7 +336,7 @@ enum TimeWallLayout {
             let widen = max(1.15, CGFloat(usedRows) / CGFloat(maxRows))
             contentWidth = min(contentWidth * widen, availableWidth * 8)
             placed = placeWords(
-                entries: entries, sizes: sizes, axisWidth: contentWidth * scale
+                entries: entries, sizes: sizes, axisWidth: contentWidth * layoutScale
             )
         }
 
@@ -297,13 +354,13 @@ enum TimeWallLayout {
             Word(
                 clipId: word.clipId, entry: word.entry, text: word.text,
                 width: word.width, fontSize: word.fontSize, row: word.row,
-                centerX: word.centerX + sideMargin + availableWidth / 2 + offset,
+                centerX: word.centerX * compress + sideMargin + availableWidth / 2 + offset,
                 centerY: firstRowCenter + CGFloat(word.row) * rowHeight
             )
         }
         let ticks = makeTicks(entries: entries, words: words, canvasSize: canvasSize)
-        let minEdge = placed.map { $0.centerX - $0.chipWidth / 2 }.min() ?? 0
-        let maxEdge = placed.map { $0.centerX + $0.chipWidth / 2 }.max() ?? 0
+        let minEdge = placed.map { $0.centerX * compress - $0.chipWidth / 2 }.min() ?? 0
+        let maxEdge = placed.map { $0.centerX * compress + $0.chipWidth / 2 }.max() ?? 0
         return Result(
             words: words, ticks: ticks.0, minorTicks: ticks.1,
             contentWidth: contentWidth, minEdge: minEdge, maxEdge: maxEdge
@@ -374,27 +431,13 @@ enum TimeWallLayout {
         let pixelSpan = lastWord.centerX - firstWord.centerX
         guard pixelSpan > 1 else { return ([], []) }
         let secondsPerPixel = span / Double(pixelSpan)
-
+        let visibleSpan = Double(canvasSize.width) * secondsPerPixel
+        let granularity = TickGranularity.pick(forVisibleSpan: visibleSpan)
         let calendar = Calendar.current
         let formatter = DateFormatter()
-        var step = DateComponents()
-        var minorStep = DateComponents()
-        if span > 3600 * 86400 {
-            step.year = 1; minorStep.month = 1
-            formatter.setLocalizedDateFormatFromTemplate("y")
-        } else if span > 90 * 86400 {
-            step.quarter = 1; minorStep.month = 1
-            formatter.setLocalizedDateFormatFromTemplate("yMMM")
-        } else if span > 14 * 86400 {
-            step.month = 1; minorStep.day = 1
-            formatter.setLocalizedDateFormatFromTemplate("MMM")
-        } else if span > 2 * 86400 {
-            step.day = 1; minorStep.hour = 3
-            formatter.setLocalizedDateFormatFromTemplate("MMMd")
-        } else {
-            step.hour = 6; minorStep.minute = 30
-            formatter.setLocalizedDateFormatFromTemplate("MMMdHHmm")
-        }
+        let step = granularity.step
+        let minorStep = granularity.minorStep
+        formatter.setLocalizedDateFormatFromTemplate(granularity.formatTemplate)
 
         func xFor(_ date: Date) -> CGFloat {
             firstWord.centerX + CGFloat(date.timeIntervalSince(first) / secondsPerPixel)
