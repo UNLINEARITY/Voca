@@ -226,8 +226,8 @@ enum TimeWallLayout {
     static let gapCap: TimeInterval = 14 * 86400
     /// 时间轴最大放大倍数
     static let maxScale: Double = 8
-    /// 时间轴最小缩小倍数：布局加宽上限为 8 屏宽，0.125× 恰好让整条时间线
-    /// 一屏可见（scale<1 走总览压缩：行数按 1× 布局适配屏高，横向压缩、词条交叠）
+    /// 时间轴最小缩小倍数：布局加宽上限为 8 屏宽，0.125× 让整条时间线
+    /// 一屏排布；缩小后重新碰撞分行——宁可行数变多也不横向重叠
     static let minScale: Double = 0.125
 
     /// 刻度粒度按**可见时间窗**（秒/像素 × 画布宽）自适应：
@@ -320,35 +320,72 @@ enum TimeWallLayout {
         let rowHeight = (sizes.max() ?? fontBase) + 14
         let maxRows = max(1, Int(usableHeight / rowHeight))
 
-        // 确定性布局：加宽迭代固定按 1× 计算（contentWidth 与 scale 无关，
-        // 逐帧缩放不再因行数临界翻转而跳动，锚点公式因此精确）；
-        // 放大时在最终轴宽上重排分行，缩小时保持 1× 行分配、横向压缩
-        let compress = min(scale, 1)
-
+        // 稳定性统一设计：行分配永久固定为 1× 基准布局，任何缩放都不换行。
+        // · 1× 基准：二分精确最小零推挤宽（连续，无离散台阶）+ 最小位移装填；
+        // · 放大（≥1）：位置纯等比，零跳变、锚点精确；
+        // · 缩小（<1）：位置等比后同行内连续推挤——推挤量随缩放连续变化，
+        //   不换行、不丢词、不横叠；刻度仍按时间映射（密集簇内近似）。
         let dates = entries.map(\.date)
         let (positions, unitsTotal) = cappedUnits(dates: dates)
 
-        // 迭代求最小内容宽：行数 ≤ maxRows；从铺满宽度开始逐步拉宽
-        var contentWidth = availableWidth
-        var placed = placeWords(
-            entries: entries, sizes: sizes, positions: positions,
-            unitsTotal: unitsTotal, axisWidth: contentWidth
-        )
-        for _ in 0..<12 {
-            let usedRows = placed.map(\.row).max().map { $0 + 1 } ?? 1
-            if usedRows <= maxRows { break }
-            let widen = max(1.15, CGFloat(usedRows) / CGFloat(maxRows))
-            contentWidth = min(contentWidth * widen, availableWidth * 8)
-            placed = placeWords(
+        func zeroPushWidth(at scale: CGFloat) -> CGFloat {
+            var lo = availableWidth
+            var hi = availableWidth * 8
+            if !placeWords(
                 entries: entries, sizes: sizes, positions: positions,
-                unitsTotal: unitsTotal, axisWidth: contentWidth
+                unitsTotal: unitsTotal, axisWidth: hi * scale, maxRows: maxRows
+            ).pushed {
+                for _ in 0..<12 where hi - lo > 1 {
+                    let mid = (lo + hi) / 2
+                    if placeWords(
+                        entries: entries, sizes: sizes, positions: positions,
+                        unitsTotal: unitsTotal, axisWidth: mid * scale, maxRows: maxRows
+                    ).pushed {
+                        lo = mid
+                    } else {
+                        hi = mid
+                    }
+                }
+            }
+            return hi
+        }
+
+        let contentWidth = zeroPushWidth(at: 1)
+        let base = placeWords(
+            entries: entries, sizes: sizes, positions: positions,
+            unitsTotal: unitsTotal, axisWidth: contentWidth, maxRows: maxRows
+        ).words
+
+        func scaled(_ word: Word) -> Word {
+            Word(
+                clipId: word.clipId, entry: word.entry, text: word.text,
+                width: word.width, fontSize: word.fontSize, row: word.row,
+                centerX: word.centerX * scale, centerY: word.centerY
             )
         }
-        if scale > 1 {
-            placed = placeWords(
-                entries: entries, sizes: sizes, positions: positions,
-                unitsTotal: unitsTotal, axisWidth: contentWidth * scale
-            )
+        let placed: [Word]
+        if scale >= 1 {
+            placed = base.map(scaled)
+        } else {
+            // 同行连续推挤：等比缩小后，行内相邻胶囊不够 gap 时逐个右推
+            let laneCount = max(1, maxRows)
+            var lanes = [[Word]](repeating: [], count: laneCount)
+            for word in base.map(scaled) {
+                lanes[min(word.row, laneCount - 1)].append(word)
+            }
+            placed = lanes.enumerated().flatMap { lane, words in
+                let sorted = words.sorted { $0.centerX < $1.centerX }
+                var previousRight = -CGFloat.greatestFiniteMagnitude
+                return sorted.map { word in
+                    let x = max(word.centerX, previousRight + rowGap + word.chipWidth / 2)
+                    previousRight = x + word.chipWidth / 2
+                    return Word(
+                        clipId: word.clipId, entry: word.entry, text: word.text,
+                        width: word.width, fontSize: word.fontSize, row: lane,
+                        centerX: x, centerY: word.centerY
+                    )
+                }
+            }
         }
 
         // 垂直：居中；溢出时底边贴着刻度区上沿（不遮刻度）
@@ -365,7 +402,7 @@ enum TimeWallLayout {
             Word(
                 clipId: word.clipId, entry: word.entry, text: word.text,
                 width: word.width, fontSize: word.fontSize, row: word.row,
-                centerX: word.centerX * compress + sideMargin + availableWidth / 2 + offset,
+                centerX: word.centerX + sideMargin + availableWidth / 2 + offset,
                 centerY: firstRowCenter + CGFloat(word.row) * rowHeight
             )
         }
@@ -373,15 +410,14 @@ enum TimeWallLayout {
             dates: dates,
             positions: positions,
             unitsTotal: unitsTotal,
-            unitPixel: unitsTotal > 0 ? contentWidth * max(scale, 1) / unitsTotal : 0,
-            compress: compress,
+            unitPixel: unitsTotal > 0 ? contentWidth * scale / unitsTotal : 0,
             contentOrigin: sideMargin + availableWidth / 2 + offset,
             firstDate: dates.first,
             lastDate: dates.last,
             canvasSize: canvasSize
         )
-        let minEdge = placed.map { $0.centerX * compress - $0.chipWidth / 2 }.min() ?? 0
-        let maxEdge = placed.map { $0.centerX * compress + $0.chipWidth / 2 }.max() ?? 0
+        let minEdge = placed.map { $0.centerX - $0.chipWidth / 2 }.min() ?? 0
+        let maxEdge = placed.map { $0.centerX + $0.chipWidth / 2 }.max() ?? 0
         return Result(
             words: words, ticks: ticks.0, minorTicks: ticks.1,
             contentWidth: contentWidth, minEdge: minEdge, maxEdge: maxEdge
@@ -423,41 +459,57 @@ enum TimeWallLayout {
         return positions[low] + CGFloat(capped / gapCap)
     }
 
-    /// 时间→内容坐标 x（0 为内容中心），碰撞避让分到不同行。
-    /// axisWidth：时间轴像素总宽（已含缩放）。
+    /// 最小位移装填：词条按真实时间放到能零位移容纳的行（选右边缘最大的
+    /// 紧凑行）；无零位移行时选右边缘最小的行，右推刚好够的距离。
+    /// 行数 ≤ maxRows、同行永不重叠、位移只在必要时发生且取最小值。
     private static func placeWords(
         entries: [GalaxyEntry],
         sizes: [CGFloat],
         positions: [CGFloat],
         unitsTotal: CGFloat,
-        axisWidth: CGFloat
-    ) -> [Word] {
+        axisWidth: CGFloat,
+        maxRows: Int
+    ) -> (words: [Word], pushed: Bool) {
         let unitPixel = unitsTotal > 0 ? axisWidth / unitsTotal : 0
-
-        var rowRightEdges: [CGFloat] = []
+        let laneCount = max(1, maxRows)
+        var laneRight = [CGFloat](repeating: -.greatestFiniteMagnitude, count: laneCount)
         var words: [Word] = []
+        var pushed = false
         for (index, entry) in entries.enumerated() {
             let raw = GalaxyModel.displayText(entry.text)
             guard !raw.isEmpty, index < sizes.count else { continue }
             let size = sizes[index]
             let (text, width) = measuredText(raw, fontSize: size)
-            let x = (positions[index] - unitsTotal / 2) * unitPixel
+            let timeX = (positions[index] - unitsTotal / 2) * unitPixel
             let half = width / 2 + chipPadX
-            var row = 0
-            while row < rowRightEdges.count, rowRightEdges[row] + rowGap > x - half {
-                row += 1
+            var lane = -1
+            var tightest = -CGFloat.greatestFiniteMagnitude
+            for candidate in 0..<laneCount
+            where laneRight[candidate] + rowGap <= timeX - half {
+                if lane < 0 || laneRight[candidate] > tightest {
+                    tightest = laneRight[candidate]
+                    lane = candidate
+                }
             }
-            if row == rowRightEdges.count { rowRightEdges.append(-.greatestFiniteMagnitude) }
-            rowRightEdges[row] = x + half
+            var finalX = timeX
+            if lane < 0 {
+                pushed = true
+                lane = 0
+                for candidate in 1..<laneCount where laneRight[candidate] < laneRight[lane] {
+                    lane = candidate
+                }
+                finalX = max(timeX, laneRight[lane] + rowGap + half)
+            }
+            laneRight[lane] = finalX + half
             words.append(
                 Word(
                     clipId: clipID(of: entry), entry: entry, text: text,
-                    width: width, fontSize: size, row: row,
-                    centerX: x, centerY: 0
+                    width: width, fontSize: size, row: lane,
+                    centerX: finalX, centerY: 0
                 )
             )
         }
-        return words
+        return (words, pushed)
     }
 
     /// 主刻度（带日期标签）与次级细分刻度（表盘短刻度）。
@@ -468,7 +520,6 @@ enum TimeWallLayout {
         positions: [CGFloat],
         unitsTotal: CGFloat,
         unitPixel: CGFloat,
-        compress: CGFloat,
         contentOrigin: CGFloat,
         firstDate: Date?,
         lastDate: Date?,
@@ -477,7 +528,7 @@ enum TimeWallLayout {
         guard let first = firstDate, let last = lastDate else { return ([], []) }
         let span = last.timeIntervalSince(first)
         guard span > 0 else { return ([], []) }
-        let pixelSpan = Double(unitsTotal * unitPixel * compress)
+        let pixelSpan = Double(unitsTotal * unitPixel)
         guard pixelSpan > 1 else { return ([], []) }
         let secondsPerPixel = span / pixelSpan
         let visibleSpan = Double(canvasSize.width) * secondsPerPixel
@@ -490,7 +541,7 @@ enum TimeWallLayout {
 
         func xFor(_ date: Date) -> CGFloat {
             (unit(at: date, dates: dates, positions: positions) - unitsTotal / 2)
-                * unitPixel * compress + contentOrigin
+                * unitPixel + contentOrigin
         }
 
         var ticks: [Tick] = []

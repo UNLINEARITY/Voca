@@ -178,24 +178,41 @@ final class GalaxyTimeWallTests: XCTestCase {
         XCTAssertEqual(TimeWallLayout.TickGranularity.quarter.minorStep.month, 1)
     }
 
-    func testZoomedOutDenseWallFitsOnScreen() {
-        // 几天内的稠密数据：缩到最小时整条时间线一屏可见，行数不超出屏高
+    /// 缩小总览不横叠：任何缩放下同行相邻胶囊至少隔 rowGap，
+    /// 缩到最小时全部词条横向都在屏内（行数可增多）
+    func testZoomedOutDenseWallHasNoHorizontalOverlap() {
         let clips = (0..<80).map { index in
             clip(Int64(index), "word\(index)", daysAgo: Double(index) * 0.04)
         }
-        let result = TimeWallLayout.layout(
+        for scale in [TimeWallLayout.minScale, 0.5, 1.0, 2.0, TimeWallLayout.maxScale] {
+            let result = TimeWallLayout.layout(
+                clips: clips, canvasSize: CGSize(width: 1000, height: 500),
+                fontBase: 17, scale: scale, offset: 0
+            )
+            XCTAssertEqual(result.words.count, 80)
+            let byRow = Dictionary(grouping: result.words, by: \.row)
+            for (_, words) in byRow {
+                let sorted = words.sorted { $0.centerX < $1.centerX }
+                for index in 1..<sorted.count {
+                    let previous = sorted[index - 1]
+                    let word = sorted[index]
+                    XCTAssertGreaterThanOrEqual(
+                        word.centerX - word.chipWidth / 2
+                            - (previous.centerX + previous.chipWidth / 2),
+                        8 - 0.5,
+                        "overlap at scale \(scale): \(previous.text)/\(word.text)"
+                    )
+                }
+            }
+        }
+        let overview = TimeWallLayout.layout(
             clips: clips, canvasSize: CGSize(width: 1000, height: 500),
             fontBase: 17, scale: TimeWallLayout.minScale, offset: 0
         )
-        XCTAssertEqual(result.words.count, 80)
-        for word in result.words {
-            XCTAssertGreaterThanOrEqual(word.centerX, 0)
-            XCTAssertLessThanOrEqual(word.centerX, 1000)
-        }
-        let rowHeight: CGFloat = 17 + 14
-        let maxRows = max(1, Int(500 - 48) / Int(rowHeight))
-        XCTAssertLessThanOrEqual((result.words.map(\.row).max() ?? 0) + 1, maxRows)
-        XCTAssertFalse(result.ticks.isEmpty)
+        // 缩到最小时总览跨度约一屏（密簇推挤链可略微超出，平移可达）
+        let span = overview.words.map { $0.centerX + $0.chipWidth / 2 }.max()!
+            - overview.words.map { $0.centerX - $0.chipWidth / 2 }.min()!
+        XCTAssertLessThanOrEqual(span, 952 * 1.25)
     }
 
     func testZoomedOutWallStillDrawsTicks() {
@@ -213,21 +230,66 @@ final class GalaxyTimeWallTests: XCTestCase {
         }
     }
 
-    /// 频闪回归：加宽迭代与 scale 解耦，同数据同画布下 contentWidth 逐 scale 一致，
-    /// 位置严格随 scale 线性（锚点缩放公式成立的前提）
-    func testContentWidthIsScaleInvariant() {
-        let clips = (0..<60).map { index in
-            clip(Int64(index), "word\(index)", daysAgo: Double(index) * 0.2)
+    /// 突发密集簇：任何缩放下行数不超出屏高（不丢词）、无同行重叠
+    /// 稳定性回归：scale ≥ 1 时内容宽固定为 1× 最小宽，
+    /// 任意两个 ≥1 的缩放档之间位置严格等比（放大零跳变）
+    func testZoomInIsPureLinearScaling() {
+        let clips = (0..<40).map { index in
+            clip(Int64(index), "word\(index)", daysAgo: Double(index) * 1.7)
         }
-        var widths: Set<CGFloat> = []
-        for scale in stride(from: 0.125, through: 8.0, by: 0.125) {
+        let base = TimeWallLayout.layout(
+            clips: clips, canvasSize: CGSize(width: 1000, height: 500),
+            fontBase: 17, scale: 1, offset: 0
+        )
+        XCTAssertFalse(base.words.isEmpty)
+        for scale in [1.7, 3.0, 5.5, TimeWallLayout.maxScale] {
+            let zoomed = TimeWallLayout.layout(
+                clips: clips, canvasSize: CGSize(width: 1000, height: 500),
+                fontBase: 17, scale: scale, offset: 0
+            )
+            for (index, word) in zoomed.words.enumerated() {
+                XCTAssertEqual(
+                    word.centerX,
+                    (base.words[index].centerX - 500) * scale + 500,
+                    accuracy: 0.5
+                )
+                XCTAssertEqual(word.row, base.words[index].row)
+            }
+        }
+    }
+
+    func testBurstClusterNeverOverflowsRowsOrOverlaps() {
+        var clips: [Clip] = [clip(1, "old1", daysAgo: 40), clip(2, "old2", daysAgo: 20)]
+        for index in 0..<30 {
+            clips.append(clip(Int64(100 + index), "burst\(index)", daysAgo: Double(index) * 0.01))
+        }
+        let rowHeight: CGFloat = 17 + 14
+        let maxRows = max(1, Int(500 - 48) / Int(rowHeight))
+        for scale in [TimeWallLayout.minScale, 0.5, 1.0, 4.0, TimeWallLayout.maxScale] {
             let result = TimeWallLayout.layout(
                 clips: clips, canvasSize: CGSize(width: 1000, height: 500),
                 fontBase: 17, scale: scale, offset: 0
             )
-            widths.insert(result.contentWidth)
+            XCTAssertEqual(result.words.count, 32, "words lost at scale \(scale)")
+            XCTAssertLessThanOrEqual(
+                (result.words.map(\.row).max() ?? 0) + 1, maxRows,
+                "rows overflow screen at scale \(scale)"
+            )
+            let byRow = Dictionary(grouping: result.words, by: \.row)
+            for (_, words) in byRow {
+                let sorted = words.sorted { $0.centerX < $1.centerX }
+                for index in 1..<sorted.count {
+                    let previous = sorted[index - 1]
+                    let word = sorted[index]
+                    XCTAssertGreaterThanOrEqual(
+                        word.centerX - word.chipWidth / 2
+                            - (previous.centerX + previous.chipWidth / 2),
+                        8 - 0.5,
+                        "overlap at scale \(scale): \(previous.text)/\(word.text)"
+                    )
+                }
+            }
         }
-        XCTAssertEqual(widths.count, 1, "contentWidth must not depend on scale")
     }
 
     /// 刻度与词条同映射：稀疏长空档数据在最大放大下，平移到词条簇时刻度紧邻词条
