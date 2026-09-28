@@ -29,6 +29,7 @@ struct SettingsView: View {
     @State private var databaseBytes: Int64 = 0
     @State private var confirmingClearLibrary = false
     @AppStorage(DisplayLanguage.preferenceKey) private var displayLanguage = DisplayLanguage.system.rawValue
+    @AppStorage(NativeMenuLanguagePreference.restartKey) private var menuLanguageNeedsRestart = false
     @AppStorage("listFontSize") private var listFontSize = Typography.listDefault
     @AppStorage("popupFontSize") private var popupFontSize = Typography.popupDefault
     @AppStorage("popupWidth") private var popupWidth = 400.0
@@ -65,6 +66,11 @@ struct SettingsView: View {
             }
         }
         .task { refreshInfo() }
+        .onChange(of: displayLanguage) { _, newValue in
+            NativeMenuLanguagePreference.selectionChanged(
+                to: DisplayLanguage(rawValue: newValue) ?? .system
+            )
+        }
     }
 
     // MARK: - 通用
@@ -77,6 +83,11 @@ struct SettingsView: View {
                 Text("简体中文").tag(DisplayLanguage.simplifiedChinese.rawValue)
             }
             .pickerStyle(.menu)
+            if menuLanguageNeedsRestart {
+                Text("macOS 菜单语言将在下次启动 Voca 后更新。")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+            }
             SharedToggleRows()
         }
     }

@@ -114,6 +114,10 @@
 "搜索全文" = "Search all text";
 "收入词库" = "Save to library";
 "Voca 帮助" = "Voca Help";
+"未设置" = "Not set";
+"没有匹配的词条" = "No matching entries";
+"换个关键词试试。" = "Try another search term.";
+"Voca: 保存失败" = "Voca: Could not save";
 "弹幕（检索档）" = "Danmaku (Search)";
 "时间线" = "Timeline";
 "词条按保存时间从旧到新横向排布" = "Entries run left to right from oldest to newest";
@@ -123,6 +127,14 @@
 "⇧⌥←→ 切换时间线 / 词库 / 剪贴板" = "⇧⌥←→ Switch Timeline / Library / Clipboard";
 "⇧⌥↓ 进入星图 · ⇧⌥↑ 返回工作区" = "⇧⌥↓ Open the galaxy · ⇧⌥↑ Return to the workspace";
 "ESC 关闭查词浮窗或退出星图" = "Esc closes the lookup popup or exits the galaxy";
+"工作区中 ⇧⌥↓ 进入星图 · 星图中 ⇧⌥↑ 返回工作区" = "In the workspace, ⇧⌥↓ opens the galaxy · In the galaxy, ⇧⌥↑ returns to the workspace";
+"⇧⌥←→ 切换工作区标签或星图档位（未编辑文字时）" = "⇧⌥←→ Switch workspace tabs or galaxy modes (outside text editing)";
+"⇧⌘←→ 也可切换星图档位（未编辑文字时）" = "⇧⌘←→ Also switches galaxy modes (outside text editing)";
+"⌘, 开关星图设置（仅显示 Dock 图标时）" = "⌘, Toggles Galaxy Settings (Dock icon visible only)";
+"Return 编辑词库球面选中的词条" = "Return edits the selected Library sphere entry";
+"ESC 关闭查词浮窗；星图中先取消选择，再退出" = "Esc closes the lookup popup; in the galaxy, deselects before exiting";
+"拖动或双指左右滑动浏览 · 滚轮或捏合缩放 · 双击空白复位" = "Drag or scroll horizontally to browse · scroll wheel or pinch to zoom · double-click empty space to reset";
+"单击词条显示详情与操作 · 双击词条打开查词浮窗" = "Click an entry for details and actions · double-click to open the lookup popup";
 "单击词条选中，底部显示操作栏" = "Click an entry to select it; actions appear at the bottom";
 "双击词条打开查词浮窗" = "Double-click an entry to open the lookup popup";
 "收起" = "Collapse";
@@ -236,6 +248,7 @@
 "退出星图（ESC）" = "Exit galaxy (Esc)";
 "通用" = "General";
 "语言" = "Language";
+"macOS 菜单语言将在下次启动 Voca 后更新。" = "The macOS menu language updates the next time you open Voca.";
 "跟随系统" = "Follow system";
 "English" = "English";
 "简体中文" = "Simplified Chinese";

@@ -310,7 +310,7 @@ final class ClipStore: ObservableObject {
             }
         }
         guard let saved = result else {
-            throw DatabaseError(resultCode: .SQLITE_ERROR, message: "Voca: 保存失败")
+            throw DatabaseError(resultCode: .SQLITE_ERROR, message: L10n.text("Voca: 保存失败"))
         }
         publishSaved(saved)
         return saved

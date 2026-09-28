@@ -198,8 +198,14 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
 struct VocaApp: App {
     @NSApplicationDelegateAdaptor(AppDelegate.self) private var appDelegate
     @StateObject private var model = AppModel.shared
+    @AppStorage(DisplayLanguage.preferenceKey) private var displayLanguage = DisplayLanguage.system.rawValue
+
+    private func menuTitle(_ key: String) -> String {
+        L10n.text(key, language: DisplayLanguage(rawValue: displayLanguage) ?? .system)
+    }
 
     init() {
+        NativeMenuLanguagePreference.prepareAtLaunch()
         // 启动即恢复 Dock 图标偏好(LSUIElement=true 仅决定初始形态,运行时可切换)
         let dockEnabled = UserDefaults.standard.object(forKey: AppModel.showsDockIconKey) != nil
             && UserDefaults.standard.bool(forKey: AppModel.showsDockIconKey)
@@ -238,25 +244,25 @@ struct VocaApp: App {
         }
         .menuBarExtraStyle(.window)
         .commands {
-            CommandMenu("星图") {
-                Button("打开时间线星图") {
+            CommandMenu(menuTitle("星图")) {
+                Button(menuTitle("打开时间线星图")) {
                     openGalaxyFromMenu(.search)
                 }
-                Button("打开词库星图") {
+                Button(menuTitle("打开词库星图")) {
                     openGalaxyFromMenu(.library)
                 }
-                Button("打开剪贴板星图") {
+                Button(menuTitle("打开剪贴板星图")) {
                     openGalaxyFromMenu(.clipboard)
                 }
                 Divider()
                 GalaxyTuningToggle()
                 Divider()
-                Button("退出星图") {
+                Button(menuTitle("退出星图")) {
                     GalaxyWindowController.shared.close()
                 }
             }
             CommandGroup(replacing: .help) {
-                Button("Voca 帮助") {
+                Button(menuTitle("Voca 帮助")) {
                     HelpWindowController.shared.show()
                 }
             }
@@ -274,9 +280,13 @@ struct VocaApp: App {
 @MainActor
 private struct GalaxyTuningToggle: View {
     @ObservedObject private var model = GalaxyWindowController.shared.model
+    @AppStorage(DisplayLanguage.preferenceKey) private var displayLanguage = DisplayLanguage.system.rawValue
 
     var body: some View {
-        Toggle("星图设置", isOn: $model.showTuning)
+        Toggle(
+            L10n.text("星图设置", language: DisplayLanguage(rawValue: displayLanguage) ?? .system),
+            isOn: $model.showTuning
+        )
             .keyboardShortcut(",", modifiers: .command)
     }
 }
@@ -290,6 +300,7 @@ private final class HelpWindowController {
 
     func show() {
         if let window {
+            updateTitle()
             window.makeKeyAndOrderFront(nil)
             NSApp.activate(ignoringOtherApps: true)
             return
@@ -301,7 +312,7 @@ private final class HelpWindowController {
             backing: .buffered,
             defer: false
         )
-        window.title = "Voca 帮助"
+        window.title = L10n.text("Voca 帮助")
         window.identifier = NSUserInterfaceItemIdentifier("voca.help")
         window.contentView = NSHostingView(rootView: content)
         window.isReleasedWhenClosed = false
@@ -310,35 +321,69 @@ private final class HelpWindowController {
         window.makeKeyAndOrderFront(nil)
         NSApp.activate(ignoringOtherApps: true)
     }
+
+    func updateTitle() {
+        window?.title = L10n.text("Voca 帮助")
+    }
 }
 
-private struct HelpContentView: View {
+struct HelpContentView: View {
+    @AppStorage(DisplayLanguage.preferenceKey) private var displayLanguage = DisplayLanguage.system.rawValue
+    @State private var shortcutRevision = 0
+
+    private var language: DisplayLanguage {
+        DisplayLanguage(rawValue: displayLanguage) ?? .system
+    }
+
     var body: some View {
+        let _ = shortcutRevision // Keep the open help window in sync with shortcut recordings.
         ScrollView {
             VStack(alignment: .leading, spacing: 14) {
+                helpSection("快捷键", items: [
+                    Self.shortcutLine("保存选中文字：", name: .saveSelection, language: language),
+                    Self.shortcutLine("查词 / 翻译：", name: .lookupWord, language: language),
+                    Self.shortcutLine("打开工作区：", name: .openGalaxy, language: language),
+                    Self.shortcutLine("星图设置（仅星图聚焦时）：", name: .galaxyTuning, language: language),
+                    L10n.text("⇧⌥←→ 切换工作区标签或星图档位（未编辑文字时）", language: language),
+                    L10n.text("⇧⌘←→ 也可切换星图档位（未编辑文字时）", language: language),
+                    L10n.text("工作区中 ⇧⌥↓ 进入星图 · 星图中 ⇧⌥↑ 返回工作区", language: language),
+                    L10n.text("⌘, 开关星图设置（仅显示 Dock 图标时）", language: language),
+                    L10n.text("Return 编辑词库球面选中的词条", language: language),
+                    L10n.text("ESC 关闭查词浮窗；星图中先取消选择，再退出", language: language),
+                ])
                 helpSection("星图", items: [
-                    "拖拽或双指滑动旋转球体",
-                    "⇧⌥←→ 切换时间线 / 词库 / 剪贴板",
-                    "⇧⌥↓ 进入星图 · ⇧⌥↑ 返回工作区",
-                    "ESC 关闭查词浮窗或退出星图",
+                    L10n.text("拖拽或双指滑动旋转球体", language: language),
                 ])
                 helpSection("时间线", items: [
-                    "词条按保存时间从旧到新横向排布",
-                    "拖动或双指左右滑动浏览 · 滚轮或捏合缩放 · 双击空白复位",
-                    "单击词条显示详情与操作 · 双击词条打开查词浮窗",
+                    L10n.text("词条按保存时间从旧到新横向排布", language: language),
+                    L10n.text("拖动或双指左右滑动浏览 · 滚轮或捏合缩放 · 双击空白复位", language: language),
+                    L10n.text("单击词条显示详情与操作 · 双击词条打开查词浮窗", language: language),
                 ])
             }
             .padding(24)
             .frame(maxWidth: .infinity, alignment: .leading)
         }
+        .onReceive(NotificationCenter.default.publisher(for: UserDefaults.didChangeNotification)) { _ in
+            shortcutRevision &+= 1
+        }
+        .onChange(of: displayLanguage) { _, _ in
+            HelpWindowController.shared.updateTitle()
+        }
+    }
+
+    static func shortcutLine(_ label: String, name: KeyboardShortcuts.Name, language: DisplayLanguage) -> String {
+        let binding = KeyboardShortcuts.getShortcut(for: name)?.description
+            ?? L10n.text("未设置", language: language)
+        let title = L10n.text(label, language: language)
+        return title + (title.hasSuffix(":") ? " " : "") + binding
     }
 
     private func helpSection(_ title: String, items: [String]) -> some View {
         VStack(alignment: .leading, spacing: 8) {
-            Text(L10n.text(title))
+            Text(L10n.text(title, language: language))
                 .font(.headline)
             ForEach(items, id: \.self) { item in
-                Text(L10n.text(item))
+                Text(item)
                     .font(.system(size: 13))
                     .foregroundStyle(.secondary)
             }

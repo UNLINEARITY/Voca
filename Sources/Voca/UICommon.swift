@@ -42,6 +42,64 @@ enum DisplayLanguage: String {
     }
 }
 
+/// AppKit reads its standard menus from the per-app language preference at launch.
+/// Preserve any macOS per-app override when Voca temporarily selects its own language.
+@MainActor
+enum NativeMenuLanguagePreference {
+    static let restartKey = "nativeMenuLanguageNeedsRestart"
+    private static let managedKey = "nativeMenuLanguageManaged"
+    private static let previousKey = "nativeMenuPreviousAppleLanguages"
+    private static var languagesAtLaunch: [String]?
+
+    private static func appLanguages(in defaults: UserDefaults, domain: String) -> [String]? {
+        defaults.persistentDomain(forName: domain)?["AppleLanguages"] as? [String]
+    }
+
+    @discardableResult
+    static func apply(_ selection: DisplayLanguage, defaults: UserDefaults, domain: String) -> Bool {
+        let before = appLanguages(in: defaults, domain: domain)
+        if let name = selection.resourceName {
+            if !defaults.bool(forKey: managedKey) {
+                if let before { defaults.set(before, forKey: previousKey) }
+                defaults.set(true, forKey: managedKey)
+            }
+            let desired = [name]
+            if before != desired { defaults.set(desired, forKey: "AppleLanguages") }
+            return before != desired
+        }
+        guard defaults.bool(forKey: managedKey) else { return false }
+        let previous = defaults.stringArray(forKey: previousKey)
+        if let previous {
+            defaults.set(previous, forKey: "AppleLanguages")
+        } else {
+            defaults.removeObject(forKey: "AppleLanguages")
+        }
+        defaults.removeObject(forKey: previousKey)
+        defaults.removeObject(forKey: managedKey)
+        return before != previous
+    }
+
+    static func prepareAtLaunch() {
+        let defaults = UserDefaults.standard
+        let domain = Bundle.main.bundleIdentifier ?? "local.voca.Voca"
+        languagesAtLaunch = appLanguages(in: defaults, domain: domain)
+        let selection = DisplayLanguage(
+            rawValue: defaults.string(forKey: DisplayLanguage.preferenceKey) ?? ""
+        ) ?? .system
+        _ = apply(selection, defaults: defaults, domain: domain)
+        // Runs before AppKit builds menus: whatever apply() changed is live this launch.
+        defaults.set(false, forKey: restartKey)
+    }
+
+    static func selectionChanged(to selection: DisplayLanguage) {
+        let defaults = UserDefaults.standard
+        let domain = Bundle.main.bundleIdentifier ?? "local.voca.Voca"
+        apply(selection, defaults: defaults, domain: domain)
+        defaults.set(appLanguages(in: defaults, domain: domain) != languagesAtLaunch,
+                     forKey: restartKey)
+    }
+}
+
 /// Installed on every SwiftUI root, including AppKit-hosted windows and popups.
 struct DisplayLanguageView<Content: View>: View {
     @AppStorage(DisplayLanguage.preferenceKey) private var language = DisplayLanguage.system.rawValue
