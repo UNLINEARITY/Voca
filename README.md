@@ -2,7 +2,11 @@
 
 English · [Simplified Chinese](README.zh-CN.md)
 
+<p align='center'><img src='docs/pictures/voca-1.png' width=90%></p>
+
 Voca is an open-source menu bar app that helps you collect and revisit text on your Mac. Save a selection without leaving the app you're using, look up words in a bundled dictionary, translate with macOS, and explore your library in a fullscreen timeline or word galaxy. A separate clipboard history keeps copied text and images within reach. Your collection stays in a local SQLite database.
+
+<p align='center'><img src='docs/pictures/voca-2.png' width=90%></p>
 
 ## Download and install
 
@@ -19,6 +23,10 @@ If macOS blocks an unnotarized download, try opening Voca and then choose **Syst
 The app follows your macOS language preference by default: Simplified Chinese is supported, and English is the fallback. To override it, choose **Settings → General → Language → English / Simplified Chinese**; select **Follow system** to return to the macOS language. System permission dialogs and the macOS Services menu continue to follow macOS's own language setting.
 
 ## Everyday use
+
+<p align='center'><img src='docs/pictures/voca-3.png' width=90%></p>
+
+<p align='center'><img src='docs/pictures/voca-4.png' width=90%></p>
 
 | Feature | How it works |
 |---|---|

@@ -115,9 +115,12 @@ jobs:
             --title "$TAG" --verify-tag --generate-notes \
             "build/Voca-${TAG}-macOS.zip" \
             "build/Voca-${TAG}-macOS.dmg"
-          # Prepend curated English notes above the generated part.
+          # Prepend the hero image (absolute URL pinned to the tag; relative
+          # paths do not resolve in release bodies), then curated English notes
+          # above the generated part.
           GENERATED="$(gh release view "$TAG" --json body -q .body)"
           {
+            printf "<p align='center'><img src='https://github.com/UNLINEARITY/Voca/raw/%s/docs/pictures/voca-1.png' width=90%%></p>\n\n" "$TAG"
             cat "docs/releases/${TAG}.md"
             printf '\n---\n\n'
             printf '%s\n' "$GENERATED"

@@ -28,7 +28,7 @@ A completed build must contain zero errors and zero warnings.
 
 - The app version has a single source: the nearest Git tag, read by `build.sh` (`git describe --tags --abbrev=0`). It feeds the generated `Info.plist` (`CFBundleShortVersionString`) and Settings → About; the build number is the commit count. No source or documentation file carries a hand-maintained version number — preparing a release never involves version bumps elsewhere. Verify this before claiming one was missed.
 - Preparing a release `<tag>`: write `docs/releases/<tag>.md` and `docs/releases/<tag>_CN.md` from the real `git diff <previous_tag>..<tag>` (not commit titles), structurally aligned and bilingual, with every claim checked against the diff; then run the full gate (`swift build`, `swift test`, `./build.sh`).
-- Pushing a plain `x.y.z` tag triggers `.github/workflows/release.yml`: build → test → bundle → ZIP + DMG → GitHub Release combining the curated **English** notes with auto-generated ones; the workflow requires `docs/releases/<tag>.md` to exist. A tag is not itself a downloadable asset; CI artifacts are ad-hoc signed and not notarized.
+- Pushing a plain `x.y.z` tag triggers `.github/workflows/release.yml`: build → test → bundle → ZIP + DMG → GitHub Release prepending the `docs/pictures/voca-1.png` hero image (absolute URL pinned to the tag) above the curated **English** notes and auto-generated ones; the workflow requires `docs/releases/<tag>.md` to exist. A tag is not itself a downloadable asset; CI artifacts are ad-hoc signed and not notarized.
 
 ## Source map
 

@@ -2,7 +2,11 @@
 
 [英文](README.md) · 简体中文
 
+<p align='center'><img src='docs/pictures/voca-1.png' width=90%></p>
+
 Voca 是一款开源的菜单栏应用，帮你在本机收藏和回看文字。在其他应用中选中文字即可静默收入词库；还可以使用内嵌词典查词、借助 macOS 翻译，并在全屏时间线或词语星图中浏览收藏。独立的剪贴板历史保留复制的文字与图片。所有收藏存放在本机 SQLite 数据库中。
+
+<p align='center'><img src='docs/pictures/voca-2.png' width=90%></p>
 
 ## 下载与安装
 
@@ -19,6 +23,10 @@ Voca 需要 macOS 26 或更高版本。请在 [GitHub 发行页面](https://gith
 界面默认跟随 macOS 的语言偏好：支持简体中文，其余语言回退到英文。若想单独调整，可在**设置 → 通用 → 语言**中选英文或简体中文；选「跟随系统」即可恢复自动选择。系统权限提示与 macOS 右键服务菜单仍跟随系统语言。
 
 ## 日常使用
+
+<p align='center'><img src='docs/pictures/voca-3.png' width=90%></p>
+
+<p align='center'><img src='docs/pictures/voca-4.png' width=90%></p>
 
 | 功能 | 操作与行为 |
 |---|---|
