@@ -1,13 +1,14 @@
 # Release automation for version tags (e.g. 2.1.0).
 #
 # Pushing a plain x.y.z tag runs the full gate (build -> test -> bundle),
-# then zips build/Voca.app and creates a GitHub Release whose body combines
+# then packages build/Voca.app as a zip and drag-to-Applications DMG,
+# and creates a GitHub Release whose body combines
 # docs/releases/<tag>_CN.md (curated Chinese notes, required) and optionally
 # docs/releases/<tag>.md (English) with the notes GitHub auto-generates
 # (commit/PR list and full-changelog diff link). A failed gate leaves no
 # release behind. Version injected into Info.plist comes from the tag itself.
 # 发布流程：先写 docs/releases/<tag>_CN.md（必填，可另附 <tag>.md 英文版），
-# 再推 x.y.z tag；门禁通过后自动打包 zip 并创建 Release。
+# 再推 x.y.z tag；门禁通过后自动打包 ZIP 和 DMG 并创建 Release。
 
 name: Release
 
@@ -66,6 +67,32 @@ jobs:
           cd build
           ditto -c -k --sequesterRsrc --keepParent Voca.app "Voca-${TAG}-macOS.zip"
 
+      - name: Package and verify DMG
+        run: |
+          set -euo pipefail
+          TAG="${GITHUB_REF_NAME}"
+          STAGING="$(mktemp -d)"
+          MOUNT="$(mktemp -d)"
+          ATTACHED=0
+          cleanup() {
+            if [ "$ATTACHED" -eq 1 ]; then
+              hdiutil detach "$MOUNT"
+            fi
+            rm -rf "$STAGING" "$MOUNT"
+          }
+          trap cleanup EXIT
+          cp -R build/Voca.app "$STAGING/Voca.app"
+          ln -s /Applications "$STAGING/Applications"
+          hdiutil create -volname Voca -srcfolder "$STAGING" -format UDZO \
+            "build/Voca-${TAG}-macOS.dmg"
+          hdiutil verify "build/Voca-${TAG}-macOS.dmg"
+          hdiutil attach -readonly -nobrowse -mountpoint "$MOUNT" \
+            "build/Voca-${TAG}-macOS.dmg"
+          ATTACHED=1
+          test -x "$MOUNT/Voca.app/Contents/MacOS/Voca"
+          test "$(readlink "$MOUNT/Applications")" = /Applications
+          codesign --verify --verbose "$MOUNT/Voca.app"
+
       - name: Create GitHub release
         env:
           GH_TOKEN: ${{ github.token }}
@@ -75,7 +102,8 @@ jobs:
           # Start from GitHub's auto-generated notes (What's Changed, full changelog).
           gh release create "$TAG" \
             --title "$TAG" --verify-tag --generate-notes \
-            "build/Voca-${TAG}-macOS.zip"
+            "build/Voca-${TAG}-macOS.zip" \
+            "build/Voca-${TAG}-macOS.dmg"
           # Prepend curated notes (Chinese required, English optional) above the generated part.
           GENERATED="$(gh release view "$TAG" --json body -q .body)"
           {

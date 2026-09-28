@@ -17,7 +17,9 @@ swift build          # Development build
 open build/Voca.app  # Launch the menu bar app
 ```
 
-The build script packages the embedded dictionary and dependency resources, signs the app (using the local “Voca Development” identity when available, otherwise ad-hoc), and verifies the signature. An ad-hoc signature may not preserve previously granted macOS privacy permissions across builds. The app currently has no installer or automatic updater.
+The build script packages the embedded dictionary and dependency resources, signs the app (using the local “Voca Development” identity when available, otherwise ad-hoc), and verifies the signature. An ad-hoc signature may not preserve previously granted macOS privacy permissions across builds. The app has no automatic updater.
+
+For a tagged release, download the DMG from GitHub Releases, open it, and drag Voca into Applications; a ZIP is also available. CI builds use ad-hoc signing and are not notarized, so macOS may block the first launch. If that happens, use **System Settings → Privacy & Security → Open Anyway** after attempting to open Voca. Grant Accessibility permission to the installed app, not a copy on the DMG.
 
 ## First run
 
