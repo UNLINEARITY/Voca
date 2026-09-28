@@ -225,11 +225,18 @@ final class GalaxyModel: ObservableObject {
         let new = min(max(old * factor, TimeWallLayout.minScale), TimeWallLayout.maxScale)
         guard new != old else { return }
         timeWallScale = new
-        // 以指针为锚缩放：保持锚点下的时刻不动
+        // 以指针为锚缩放：保持锚点下的时刻不动（布局确定性保证位置严格随 scale 线性，
+        // 公式精确）；边缘同比例缩放，避免用到上一帧的旧边界拖拽平移位置
         if let anchorX, let width = canvasWidth {
             let center = width / 2
             let ratio = new / old
             timeWallOffset = (anchorX - center) * (1 - ratio) + timeWallOffset * ratio
+            if let edges = timeWallEdges {
+                timeWallEdges = (
+                    min: edges.min * ratio,
+                    max: edges.max * ratio
+                )
+            }
         }
         clampTimeWallOffset(canvasWidth: canvasWidth)
     }

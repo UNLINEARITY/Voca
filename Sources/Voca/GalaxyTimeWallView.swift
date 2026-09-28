@@ -247,7 +247,8 @@ enum TimeWallLayout {
             var c = DateComponents()
             switch self {
             case .year: c.year = 1
-            case .quarter: c.quarter = 1
+            // byAdding 不支持 .quarter（返回原日期，旧代码因此零刻度）；季度 = 3 个月
+            case .quarter: c.month = 3
             case .month: c.month = 1
             case .day: c.day = 1
             case .hour: c.hour = 6
@@ -319,16 +320,19 @@ enum TimeWallLayout {
         let rowHeight = (sizes.max() ?? fontBase) + 14
         let maxRows = max(1, Int(usableHeight / rowHeight))
 
-        // 总览压缩：scale<1 时行分配按 1× 布局计算（行数适配屏高、不爆行），
-        // 横向位置再整体压缩——词条左右交叠但全部可见；
-        // scale≥1 时维持既有碰撞避让分行，且不因缩小而重新加宽
-        let layoutScale = max(scale, 1)
+        // 确定性布局：加宽迭代固定按 1× 计算（contentWidth 与 scale 无关，
+        // 逐帧缩放不再因行数临界翻转而跳动，锚点公式因此精确）；
+        // 放大时在最终轴宽上重排分行，缩小时保持 1× 行分配、横向压缩
         let compress = min(scale, 1)
+
+        let dates = entries.map(\.date)
+        let (positions, unitsTotal) = cappedUnits(dates: dates)
 
         // 迭代求最小内容宽：行数 ≤ maxRows；从铺满宽度开始逐步拉宽
         var contentWidth = availableWidth
         var placed = placeWords(
-            entries: entries, sizes: sizes, axisWidth: contentWidth * layoutScale
+            entries: entries, sizes: sizes, positions: positions,
+            unitsTotal: unitsTotal, axisWidth: contentWidth
         )
         for _ in 0..<12 {
             let usedRows = placed.map(\.row).max().map { $0 + 1 } ?? 1
@@ -336,7 +340,14 @@ enum TimeWallLayout {
             let widen = max(1.15, CGFloat(usedRows) / CGFloat(maxRows))
             contentWidth = min(contentWidth * widen, availableWidth * 8)
             placed = placeWords(
-                entries: entries, sizes: sizes, axisWidth: contentWidth * layoutScale
+                entries: entries, sizes: sizes, positions: positions,
+                unitsTotal: unitsTotal, axisWidth: contentWidth
+            )
+        }
+        if scale > 1 {
+            placed = placeWords(
+                entries: entries, sizes: sizes, positions: positions,
+                unitsTotal: unitsTotal, axisWidth: contentWidth * scale
             )
         }
 
@@ -358,7 +369,17 @@ enum TimeWallLayout {
                 centerY: firstRowCenter + CGFloat(word.row) * rowHeight
             )
         }
-        let ticks = makeTicks(entries: entries, words: words, canvasSize: canvasSize)
+        let ticks = makeTicks(
+            dates: dates,
+            positions: positions,
+            unitsTotal: unitsTotal,
+            unitPixel: unitsTotal > 0 ? contentWidth * max(scale, 1) / unitsTotal : 0,
+            compress: compress,
+            contentOrigin: sideMargin + availableWidth / 2 + offset,
+            firstDate: dates.first,
+            lastDate: dates.last,
+            canvasSize: canvasSize
+        )
         let minEdge = placed.map { $0.centerX * compress - $0.chipWidth / 2 }.min() ?? 0
         let maxEdge = placed.map { $0.centerX * compress + $0.chipWidth / 2 }.max() ?? 0
         return Result(
@@ -367,28 +388,50 @@ enum TimeWallLayout {
         )
     }
 
+    /// gap 封顶的时间→单位映射（0…total）：布局与刻度共用，
+    /// 保证刻度与词条在同一映射下排布（长空档同等压缩）
+    static func cappedUnits(dates: [Date]) -> (positions: [CGFloat], total: CGFloat) {
+        var positions: [CGFloat] = []
+        var total: CGFloat = 0
+        var previous: TimeInterval = 0
+        for (index, date) in dates.enumerated() {
+            let time = date.timeIntervalSince1970
+            if index == 0 {
+                positions.append(0)
+            } else {
+                let delta = max(0, min(time - previous, gapCap))
+                total += CGFloat(delta / gapCap)
+                positions.append(total)
+            }
+            previous = time
+        }
+        return (positions, total)
+    }
+
+    /// 任意时刻→单位：落在两个词条间时按该区间同样的 gap 封顶插值
+    static func unit(at date: Date, dates: [Date], positions: [CGFloat]) -> CGFloat {
+        guard let first = dates.first, date > first, dates.count > 1 else { return 0 }
+        if let last = dates.last, date >= last { return positions.last ?? 0 }
+        var low = 0
+        var high = dates.count - 1
+        while low < high - 1 {
+            let mid = (low + high) / 2
+            if dates[mid] <= date { low = mid } else { high = mid }
+        }
+        let delta = date.timeIntervalSince1970 - dates[low].timeIntervalSince1970
+        let capped = min(max(delta, 0), gapCap)
+        return positions[low] + CGFloat(capped / gapCap)
+    }
+
     /// 时间→内容坐标 x（0 为内容中心），碰撞避让分到不同行。
     /// axisWidth：时间轴像素总宽（已含缩放）。
     private static func placeWords(
         entries: [GalaxyEntry],
         sizes: [CGFloat],
+        positions: [CGFloat],
+        unitsTotal: CGFloat,
         axisWidth: CGFloat
     ) -> [Word] {
-        // capped 累计时间 → 相对像素（gapCap 记 1 单位）
-        var positions: [CGFloat] = []
-        var unitsTotal: CGFloat = 0
-        var previous: TimeInterval = 0
-        for (index, entry) in entries.enumerated() {
-            let time = entry.date.timeIntervalSince1970
-            if index == 0 {
-                positions.append(0)
-            } else {
-                let delta = max(0, min(time - previous, gapCap))
-                unitsTotal += CGFloat(delta / gapCap)
-                positions.append(unitsTotal)
-            }
-            previous = time
-        }
         let unitPixel = unitsTotal > 0 ? axisWidth / unitsTotal : 0
 
         var rowRightEdges: [CGFloat] = []
@@ -418,19 +461,25 @@ enum TimeWallLayout {
     }
 
     /// 主刻度（带日期标签）与次级细分刻度（表盘短刻度）。
-    private static func makeTicks(
-        entries: [GalaxyEntry], words: [Word], canvasSize: CGSize
+    /// 刻度与词条共用同一 gap 封顶映射，任何缩放下都不会错位；
+    /// 粒度按可见时间窗自适应（缩远见月/年，缩近见日/时）
+    static func makeTicks(
+        dates: [Date],
+        positions: [CGFloat],
+        unitsTotal: CGFloat,
+        unitPixel: CGFloat,
+        compress: CGFloat,
+        contentOrigin: CGFloat,
+        firstDate: Date?,
+        lastDate: Date?,
+        canvasSize: CGSize
     ) -> ([Tick], [CGFloat]) {
-        guard let first = entries.first?.date,
-              let last = entries.last?.date,
-              let firstWord = words.min(by: { $0.centerX < $1.centerX }),
-              let lastWord = words.max(by: { $0.centerX < $1.centerX })
-        else { return ([], []) }
+        guard let first = firstDate, let last = lastDate else { return ([], []) }
         let span = last.timeIntervalSince(first)
         guard span > 0 else { return ([], []) }
-        let pixelSpan = lastWord.centerX - firstWord.centerX
+        let pixelSpan = Double(unitsTotal * unitPixel * compress)
         guard pixelSpan > 1 else { return ([], []) }
-        let secondsPerPixel = span / Double(pixelSpan)
+        let secondsPerPixel = span / pixelSpan
         let visibleSpan = Double(canvasSize.width) * secondsPerPixel
         let granularity = TickGranularity.pick(forVisibleSpan: visibleSpan)
         let calendar = Calendar.current
@@ -440,7 +489,8 @@ enum TimeWallLayout {
         formatter.setLocalizedDateFormatFromTemplate(granularity.formatTemplate)
 
         func xFor(_ date: Date) -> CGFloat {
-            firstWord.centerX + CGFloat(date.timeIntervalSince(first) / secondsPerPixel)
+            (unit(at: date, dates: dates, positions: positions) - unitsTotal / 2)
+                * unitPixel * compress + contentOrigin
         }
 
         var ticks: [Tick] = []

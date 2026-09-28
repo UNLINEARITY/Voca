@@ -204,12 +204,59 @@ final class GalaxyTimeWallTests: XCTestCase {
             clip(2, "beta", daysAgo: 400),
             clip(3, "gamma", daysAgo: 1),
         ]
-        for scale in [TimeWallLayout.minScale, 1.0] {
+        for scale in [TimeWallLayout.minScale, 1.0, TimeWallLayout.maxScale] {
             let result = TimeWallLayout.layout(
                 clips: clips, canvasSize: CGSize(width: 1000, height: 500),
                 fontBase: 17, scale: scale, offset: 0
             )
             XCTAssertFalse(result.ticks.isEmpty, "ticks missing at scale \(scale)")
+        }
+    }
+
+    /// 频闪回归：加宽迭代与 scale 解耦，同数据同画布下 contentWidth 逐 scale 一致，
+    /// 位置严格随 scale 线性（锚点缩放公式成立的前提）
+    func testContentWidthIsScaleInvariant() {
+        let clips = (0..<60).map { index in
+            clip(Int64(index), "word\(index)", daysAgo: Double(index) * 0.2)
+        }
+        var widths: Set<CGFloat> = []
+        for scale in stride(from: 0.125, through: 8.0, by: 0.125) {
+            let result = TimeWallLayout.layout(
+                clips: clips, canvasSize: CGSize(width: 1000, height: 500),
+                fontBase: 17, scale: scale, offset: 0
+            )
+            widths.insert(result.contentWidth)
+        }
+        XCTAssertEqual(widths.count, 1, "contentWidth must not depend on scale")
+    }
+
+    /// 刻度与词条同映射：稀疏长空档数据在最大放大下，平移到词条簇时刻度紧邻词条
+    func testTicksAlignWithWordsAtMaxZoom() {
+        let clips = [
+            clip(1, "alpha", daysAgo: 30),
+            clip(2, "beta", daysAgo: 1),
+            clip(3, "gamma", daysAgo: 0.5),
+        ]
+        let initial = TimeWallLayout.layout(
+            clips: clips, canvasSize: CGSize(width: 1000, height: 500),
+            fontBase: 17, scale: TimeWallLayout.maxScale, offset: 0
+        )
+        guard let beta = initial.words.first(where: { $0.text == "beta" }) else {
+            XCTFail("beta word missing"); return
+        }
+        let result = TimeWallLayout.layout(
+            clips: clips, canvasSize: CGSize(width: 1000, height: 500),
+            fontBase: 17, scale: TimeWallLayout.maxScale, offset: 500 - beta.centerX
+        )
+        XCTAssertFalse(result.ticks.isEmpty)
+        // 可见窗口内每个词条附近 300px 内至少有一个刻度（同映射下刻度簇与词条簇对齐）
+        let visible = result.words.filter { $0.centerX >= 0 && $0.centerX <= 1000 }
+        XCTAssertFalse(visible.isEmpty)
+        for word in visible {
+            XCTAssertTrue(
+                result.ticks.contains { abs($0.x - word.centerX) < 300 },
+                "no tick near word \(word.text) at x=\(word.centerX)"
+            )
         }
     }
 }
