@@ -60,12 +60,13 @@ struct DisplayLanguageView<Content: View>: View {
 enum L10n {
     static let resourceBundle = Bundle.module
 
-    private static let explicitBundles: [String: Bundle] = {
-        var result: [String: Bundle] = [:]
+    private static let explicitStrings: [String: [String: String]] = {
+        var result: [String: [String: String]] = [:]
         for language in ["en", "zh-Hans"] {
-            if let path = resourceBundle.path(forResource: language, ofType: "lproj"),
-               let bundle = Bundle(path: path) {
-                result[language] = bundle
+            if let path = resourceBundle.path(forResource: "Localizable", ofType: "strings",
+                                              inDirectory: "\(language).lproj"),
+               let strings = NSDictionary(contentsOfFile: path) as? [String: String] {
+                result[language] = strings
             }
         }
         return result
@@ -75,8 +76,10 @@ enum L10n {
         let selection = language ?? DisplayLanguage(
             rawValue: UserDefaults.standard.string(forKey: DisplayLanguage.preferenceKey) ?? ""
         ) ?? .system
-        let bundle = selection.resourceName.flatMap { explicitBundles[$0] } ?? resourceBundle
-        return bundle.localizedString(forKey: key, value: key, table: nil)
+        if let name = selection.resourceName {
+            return explicitStrings[name]?[key] ?? key
+        }
+        return resourceBundle.localizedString(forKey: key, value: key, table: nil)
     }
 
     static func format(_ key: String, _ arguments: CVarArg...) -> String {
