@@ -1,26 +1,14 @@
-# Voca — save selected text on macOS
-
-Latest release: **3.0.0** ([release notes](docs/releases/3.0.0.md))
+# Voca — a local-first text library for macOS
 
 English · [Simplified Chinese](README.zh-CN.md)
 
-Voca is an open-source, local-first macOS menu bar app for saving selected text. Select text in another app, press a shortcut, and Voca quietly adds it to your library. Look up words, translate phrases, revisit what you saved in a fullscreen word galaxy, or keep a separate clipboard history. Your library stays on your Mac in SQLite.
+Voca is an open-source menu bar app that helps you collect and revisit text on your Mac. Save a selection without leaving the app you're using, look up words in a bundled dictionary, translate with macOS, and explore your library in a fullscreen timeline or word galaxy. A separate clipboard history keeps copied text and images within reach. Your collection stays in a local SQLite database.
 
 ## Download and install
 
-Voca requires macOS 26 or later. Download it from [GitHub Releases](https://github.com/UNLINEARITY/Voca/releases). Releases provide a ZIP; releases built with the current CI workflow also provide a DMG. Open the DMG and drag Voca into Applications, or unzip the ZIP and move `Voca.app` there yourself. Open the installed app from Applications before granting permissions; do not run it from the mounted DMG.
+Voca requires macOS 26 or later. Check [GitHub Releases](https://github.com/UNLINEARITY/Voca/releases) for an app download. If a DMG is available, open it and drag Voca into Applications; for a ZIP, extract `Voca.app` and move it there. Launch the installed app from Applications, not from a mounted DMG.
 
-CI builds are ad-hoc signed and not notarized, so macOS may block the first launch. After attempting to open Voca, go to **System Settings → Privacy & Security → Open Anyway** if needed. Voca has no automatic updater.
-
-To build from source, you need a Swift toolchain capable of building this Swift 5.9 package:
-
-```bash
-swift build          # Development build
-./build.sh           # Release build, signed app bundle at build/Voca.app
-open build/Voca.app  # Launch the locally built app
-```
-
-The build script packages the embedded dictionary and dependency resources, signs the app (using the local “Voca Development” identity when available, otherwise ad-hoc), and verifies the signature. An ad-hoc signature may not preserve previously granted macOS privacy permissions across builds. An Apple trackpad is needed only for the optional three-finger gesture.
+If macOS blocks an unnotarized download, try opening Voca and then choose **System Settings → Privacy & Security → Open Anyway**. Grant permissions to the installed app. Voca does not update itself automatically. Only the optional three-finger gesture requires an Apple trackpad.
 
 ## First run
 
@@ -36,10 +24,10 @@ The app follows your macOS language preference by default: Simplified Chinese is
 |---|---|
 | Save selected text | Select text in any app and press **⌥⇧S** (customizable). Voca tries Accessibility first, then a temporary copy-and-restore fallback. Secure text fields are skipped. |
 | Look up or translate | Select text and press **⌥⇧D**, or use the macOS text service **Look Up with Voca**. A cursor-side popup shows dictionary entries for words and supported phrases; unmatched text can use Apple's on-device English↔Chinese translation. The popup can save the selection and its translation as a note. |
-| Open the workspace | Press **⌥⇧V** (customizable) or use the menu bar. The resizable workspace has Settings, Library, and Clipboard tabs, remembers the last tab, and by default reappears on the desktop and screen you are currently using instead of pulling you back to where it was last shown (configurable in Settings). |
+| Open the workspace | Press **⌥⇧V** (customizable) or use the menu bar. The resizable Settings, Library, and Clipboard workspace remembers your last tab and opens on your current screen and desktop by default (configurable in Settings). |
 | Browse the library | Search the full text, expand long entries, edit text or notes, copy, delete, or open a saved source URL. Saving identical text again merges it, increments its count, and adds an event to its timeline. |
 | Clipboard history | When enabled, copied text and images appear in a separate history. Files appear for the current session only. Click **+** on a text entry to add it to the library; history is never silently merged into the library. |
-| Word galaxy | Open the fullscreen galaxy from the menu bar or workspace. Explore library, clipboard text, or search results; rotate the sphere, open item details, and return to the workspace. A native fallback remains usable without screen capture. |
+| Word galaxy and timeline | Open the fullscreen view from the menu bar or workspace. Browse library and clipboard text on a rotatable sphere, or explore saved entries on a time-mapped wall. Open item details or return to the workspace; the sphere remains usable without screen capture. |
 | Optional three-finger gesture | Enable the experimental gesture in the menu bar or Settings, then swipe down with three fingers on an Apple trackpad to save selected text. The keyboard shortcut remains available. |
 
 Double-clicking a word or phrase in a library list or galaxy opens a read-only lookup popup. The embedded English→Chinese dictionary includes pronunciation, learning annotations, word families, related phrases, and synonyms where available; British and American speech buttons use system voices. Popup width, reading area height, and text sizes can be adjusted in Settings. The lookup language pair is English↔Chinese; the app's display language does not change the dictionary's underlying content. When Settings → Dictionary → Speak after lookup is on, opening a dictionary card speaks the word automatically, British first and then American.
@@ -65,7 +53,7 @@ The three-finger gesture is **off by default** and uses an undocumented macOS Mu
 
 ## Your data
 
-The library database is at `~/Library/Application Support/Voca/voca.sqlite`. Its saved-text library (`clips` and `clip_events`) is distinct from clipboard history (`clipboard_entries` and stored images). Text and image history are persisted without automatic deduplication or a retention cap; the workspace initially loads a recent window. Copied files are session-only.
+The library database is at `~/Library/Application Support/Voca/voca.sqlite`. Its saved-text library (`clips` and `clip_events`) is distinct from clipboard history (`clipboard_entries` and stored images). Text and image history persist without content-based merging or a retention cap; repeated copies within two seconds can be suppressed. The workspace initially loads a recent window. Copied files are session-only.
 
 Use **Settings → Database → Back Up** for a safe, compact SQLite snapshot while Voca is running. You can also inspect the database with a SQLite client. For a full manual reset, quit Voca before deleting `~/Library/Application Support/Voca/` — this permanently removes your data.
 
@@ -89,11 +77,16 @@ Contributions are welcome — submitting a PR means agreeing to the contribution
 
 ## Development and license
 
+To build from source, use a Swift toolchain that supports Swift 5.9 packages:
+
 ```bash
-swift build
-swift test
-./build.sh
+swift build          # Development build
+swift test           # Run tests
+./build.sh           # Signed release bundle at build/Voca.app
+open build/Voca.app  # Launch the locally built app
 ```
+
+The build script packages the dictionary and dependency resources, signs the app (using a local development identity when available, otherwise ad-hoc), and verifies the signature. An ad-hoc signature may not preserve previously granted macOS privacy permissions across builds.
 
 The Swift package uses [GRDB](https://github.com/groue/GRDB.swift) for SQLite and [KeyboardShortcuts](https://github.com/sindresorhus/KeyboardShortcuts) for configurable global shortcuts (both MIT-licensed). New source files must retain the project's AGPL header. See [AGENTS.md](AGENTS.md) for contribution and safety requirements.
 
