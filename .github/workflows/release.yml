@@ -3,12 +3,12 @@
 # Pushing a plain x.y.z tag runs the full gate (build -> test -> bundle),
 # then packages build/Voca.app as a zip and drag-to-Applications DMG,
 # and creates a GitHub Release whose body combines
-# docs/releases/<tag>_CN.md (curated Chinese notes, required) and optionally
-# docs/releases/<tag>.md (English) with the notes GitHub auto-generates
-# (commit/PR list and full-changelog diff link). A failed gate leaves no
-# release behind. Version injected into Info.plist comes from the tag itself.
-# 发布流程：先写 docs/releases/<tag>_CN.md（必填，可另附 <tag>.md 英文版），
-# 再推 x.y.z tag；门禁通过后自动打包 ZIP 和 DMG 并创建 Release。
+# docs/releases/<tag>.md (curated English notes, required) with the notes
+# GitHub auto-generates (commit/PR list and full-changelog diff link).
+# A failed gate leaves no release behind. Version injected into Info.plist
+# comes from the tag itself.
+# 发布流程：先写 docs/releases/<tag>.md（必填英文说明），再推 x.y.z tag；
+# 门禁通过后自动打包 ZIP 和 DMG 并创建 Release。
 
 name: Release
 
@@ -29,18 +29,23 @@ concurrency:
 jobs:
   release:
     name: Quality gate and GitHub release
-    runs-on: macos-latest
+    runs-on: xcode-27
     timeout-minutes: 30
 
     steps:
       - name: Checkout
         uses: actions/checkout@v4
 
+      - name: Verify toolchain
+        run: |
+          swift --version | head -1
+          swift --version | grep -q 'Swift version 6\.[4-9]' || { echo 'This image should provide Swift 6.4+ (Xcode 27; older toolchains generate broken Bundle.module accessors)'; exit 1; }
+
       - name: Cache SwiftPM
         uses: actions/cache@v4
         with:
           path: .build
-          key: ${{ runner.os }}-spm-${{ hashFiles('Package.resolved') }}
+          key: ${{ runner.os }}-spm-${{ hashFiles('Package.resolved') }}-swift64
           restore-keys: ${{ runner.os }}-spm-
 
       - name: Build
@@ -49,14 +54,20 @@ jobs:
       - name: Test
         run: swift test
 
+      - name: Free disk space
+        run: |
+          sudo rm -rf /Applications/Xcode_27.1*.app /Applications/Xcode_27.2*.app || true
+          find .build -maxdepth 4 -type d \( -name 'Debug' -o -name 'debug' \) -exec rm -rf {} + 2>/dev/null || true
+          df -h /
+
       - name: Bundle app
         run: ./build.sh
 
       - name: Verify release notes exist
         run: |
           TAG="${GITHUB_REF_NAME}"
-          if [ ! -f "docs/releases/${TAG}_CN.md" ]; then
-            echo "docs/releases/${TAG}_CN.md is missing; refusing to publish a release without notes." >&2
+          if [ ! -f "docs/releases/${TAG}.md" ]; then
+            echo "docs/releases/${TAG}.md is missing; refusing to publish a release without notes." >&2
             exit 1
           fi
 
@@ -104,14 +115,10 @@ jobs:
             --title "$TAG" --verify-tag --generate-notes \
             "build/Voca-${TAG}-macOS.zip" \
             "build/Voca-${TAG}-macOS.dmg"
-          # Prepend curated notes (Chinese required, English optional) above the generated part.
+          # Prepend curated English notes above the generated part.
           GENERATED="$(gh release view "$TAG" --json body -q .body)"
           {
-            cat "docs/releases/${TAG}_CN.md"
-            if [ -f "docs/releases/${TAG}.md" ]; then
-              printf '\n---\n\n'
-              cat "docs/releases/${TAG}.md"
-            fi
+            cat "docs/releases/${TAG}.md"
             printf '\n---\n\n'
             printf '%s\n' "$GENERATED"
           } > /tmp/release-notes.md

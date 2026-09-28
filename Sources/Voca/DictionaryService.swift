@@ -132,7 +132,7 @@ final class DictionaryService: @unchecked Sendable {
             .appendingPathComponent(name)
         guard FileManager.default.fileExists(atPath: url.path) else { return nil }
         Self.logger.info("使用用户目录词典：\(url.path, privacy: .public)")
-        let termsURL = Bundle.module.url(forResource: "terms", withExtension: "sqlite")
+        let termsURL = AppResources.module.url(forResource: "terms", withExtension: "sqlite")
         self.init(url: url, termsURL: termsURL)
     }
 
@@ -157,11 +157,11 @@ final class DictionaryService: @unchecked Sendable {
     }
 
     convenience init(bundleResource name: String, extension ext: String) {
-        guard let url = Bundle.module.url(forResource: name, withExtension: ext) else {
+        guard let url = AppResources.module.url(forResource: name, withExtension: ext) else {
             self.init(url: nil)
             return
         }
-        let termsURL = Bundle.module.url(forResource: "terms", withExtension: "sqlite")
+        let termsURL = AppResources.module.url(forResource: "terms", withExtension: "sqlite")
         self.init(url: url, termsURL: termsURL)
     }
 

@@ -86,6 +86,13 @@ final class LocalizationTests: XCTestCase {
         XCTAssertNil(defaults.persistentDomain(forName: domain)?["AppleLanguages"])
     }
 
+    func testAppResourcesResolvesModuleBundleToolchainIndependently() {
+        XCTAssertNotNil(
+            AppResources.module.path(forResource: "Localizable", ofType: "strings", inDirectory: "en.lproj")
+        )
+        XCTAssertNotNil(AppResources.module.url(forResource: "terms", withExtension: "sqlite"))
+    }
+
     func testChineseSourceLiteralsHaveEnglishTranslations() throws {
         let bundle = L10n.resourceBundle
         let stringsPath = try XCTUnwrap(bundle.path(

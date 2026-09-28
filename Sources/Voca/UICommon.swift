@@ -114,9 +114,37 @@ struct DisplayLanguageView<Content: View>: View {
     }
 }
 
+/// 自带的模块资源包解析器，不依赖工具链生成的 Bundle.module 访问器。
+/// Swift 6.2 系工具链的访问器在 .app 包内以 .app 根目录为候选，
+/// 找不到 Contents/Resources/Voca_Voca.bundle 导致 CI 产物启动即崩；
+/// 此处候选链以 Bundle.main.resourceURL 为先，在任何工具链下都正确。
+enum AppResources {
+    private final class Token {}
+
+    static let module: Bundle = {
+        let finder = Bundle(for: Token.self)
+        let candidates: [URL?] = [
+            // .app 包：Contents/Resources（任何工具链下的正确位置）
+            Bundle.main.resourceURL,
+            // 测试：资源包被拷入 xctest 的 Resources（部分工具链）
+            finder.resourceURL,
+            finder.resourceURL?.deletingLastPathComponent(),
+            // 测试：资源包留在构建产品目录 .build/<plat>/<config>/（另一部分工具链）
+            finder.bundleURL.deletingLastPathComponent(),
+            Bundle.main.resourceURL?.deletingLastPathComponent().deletingLastPathComponent(),
+        ]
+        for case let url? in candidates {
+            if let bundle = Bundle(url: url.appendingPathComponent("Voca_Voca.bundle")) {
+                return bundle
+            }
+        }
+        fatalError("Voca: could not locate Voca_Voca.bundle")
+    }()
+}
+
 /// Localizes strings constructed outside SwiftUI's literal-based view initializers.
 enum L10n {
-    static let resourceBundle = Bundle.module
+    static let resourceBundle = AppResources.module
 
     private static let explicitStrings: [String: [String: String]] = {
         var result: [String: [String: String]] = [:]

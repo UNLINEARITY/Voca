@@ -24,6 +24,12 @@ open -n build/Voca.app --args --galaxy
 
 A completed build must contain zero errors and zero warnings.
 
+## Versioning and releases
+
+- The app version has a single source: the nearest Git tag, read by `build.sh` (`git describe --tags --abbrev=0`). It feeds the generated `Info.plist` (`CFBundleShortVersionString`) and Settings → About; the build number is the commit count. No source or documentation file carries a hand-maintained version number — preparing a release never involves version bumps elsewhere. Verify this before claiming one was missed.
+- Preparing a release `<tag>`: write `docs/releases/<tag>.md` and `docs/releases/<tag>_CN.md` from the real `git diff <previous_tag>..<tag>` (not commit titles), structurally aligned and bilingual, with every claim checked against the diff; then run the full gate (`swift build`, `swift test`, `./build.sh`).
+- Pushing a plain `x.y.z` tag triggers `.github/workflows/release.yml`: build → test → bundle → ZIP + DMG → GitHub Release combining the curated **English** notes with auto-generated ones; the workflow requires `docs/releases/<tag>.md` to exist. A tag is not itself a downloadable asset; CI artifacts are ad-hoc signed and not notarized.
+
 ## Source map
 
 | File | Primary responsibility |
@@ -55,7 +61,8 @@ Treat this map as navigation, not as an architectural boundary. Update it when r
 
 ### Packaging and permissions
 
-- The runnable app bundle must include dependency resource bundles required at runtime, including KeyboardShortcuts localization resources.
+- The runnable app bundle must include dependency resource bundles required at runtime, including KeyboardShortcuts localization resources. Bundles may only live under `Contents/` — code signing rejects unsealed contents at the `.app` root. The Release workflow builds on the `xcode-27` runner image (Swift 6.4 + macOS 27 SDK, matching local development): Swift ≤ 6.3.3 toolchains generate `Bundle.module` accessors that search the `.app` root, crashing packaged apps wherever a dependency (e.g. KeyboardShortcuts' recorder) first loads its module bundle, and the swift.org 6.4 toolchain against older SDKs cannot compile `translationTask`. `Voca_Voca.bundle` is resolved toolchain-independently through `AppResources.module`.
+- Never reference `Bundle.module` directly: resolve module resources through `AppResources.module` in `UICommon.swift`. Toolchain-generated accessors have regressed across versions (a Swift 6.2-era accessor searched the `.app` root instead of `Contents/Resources`, crashing CI builds at launch); the bundled resolver's candidate chain is toolchain-independent.
 - The final bundle must pass `codesign --verify` and satisfy its Designated Requirement. Do not assume an ad-hoc build preserves existing TCC grants.
 - The generated Info.plist must include `NSAppleEventsUsageDescription` while the app sends Apple Events.
 - Do not reset TCC permissions without the user’s explicit authorization.
@@ -86,6 +93,7 @@ Treat this map as navigation, not as an architectural boundary. Update it when r
 
 ### User-facing behavior
 
+- Every user-facing shortcut must be registered in `HelpShortcutCatalog` — customizable entries with their `KeyboardShortcuts.Name`, fixed keys as scenario lines. Voca Help renders the catalog, and a source-scan test fails when a `KeyboardShortcuts.Name` is added without a catalog entry, so Help covers all shortcuts by construction; never hand-write shortcut lines in `HelpContentView`.
 - Saving remains silent apart from the bottom-right toast.
 - Notes remain visually secondary and may span multiple lines.
 - Markdown export contains entries and blockquoted notes separated by blank lines; it does not include URLs unless the user explicitly changes the format.
